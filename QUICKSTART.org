@@ -1,0 +1,135 @@
+#+title: Quick Start Guide
+
+* Setup
+
+1. *Install dependencies:*
+   #+begin_src sh
+   pip install -r requirements.txt
+   #+end_src
+
+2. *Set environment variables:*
+   #+begin_src sh
+   export CIRCUIT_CLIENT_ID="your_client_id"
+   export CIRCUIT_CLIENT_SECRET="your_client_secret"
+   export CIRCUIT_APPKEY="your_appkey"
+   #+end_src
+
+   Or create a =~/.env~= style file:
+   #+begin_src env
+   CIRCUIT_CLIENT_ID=your_client_id
+   CIRCUIT_CLIENT_SECRET=your_client_secret
+   CIRCUIT_APPKEY=your_appkey
+   #+end_src
+
+3. *Generate SSL certificate (for HTTPS):*
+   #+begin_src sh
+   python generate_cert.py
+   #+end_src
+
+4. *Start the server:*
+
+   - *HTTP only (default):*
+     #+begin_src sh
+     python rewriter.py
+     #+end_src
+
+   - *HTTPS only:*
+     #+begin_src sh
+     python rewriter.py --ssl-only
+     #+end_src
+
+   - *Both HTTP and HTTPS:*
+     #+begin_src sh
+     python rewriter.py --ssl
+     #+end_src
+
+   The server will start on:
+   - HTTP: ~http://localhost:12000~
+   - HTTPS: ~https://localhost:12443~
+
+* Testing
+
+1. *Check if server is running:*
+   #+begin_src sh
+   curl http://localhost:12000/health
+   #+end_src
+
+2. *Test chat completion (HTTP):*
+   #+begin_src sh
+   curl -X POST http://localhost:12000/v1/chat/completions \
+     -H "Content-Type: application/json" \
+     -d '{
+       "model": "gpt-4o-mini",
+       "messages": [{"role": "user", "content": "Hello!"}]
+     }'
+   #+end_src
+
+* Debugging "Invalid HTTP request received"
+
+This error usually means:
+- You're using ~https://~ instead of ~http://~ (most common!)
+- Something else is running on port ~12000~
+- Malformed HTTP requests
+
+To debug:
+#+begin_src sh
+python debug_invalid_http.py
+#+end_src
+
+* Using with OpenAI SDK
+
+- *HTTP:*
+  #+begin_src python
+  from openai import OpenAI
+
+  client = OpenAI(
+      base_url="http://localhost:12000/v1",
+      api_key="any-key-here"
+  )
+
+  response = client.chat.completions.create(
+      model="gpt-4o-mini",
+      messages=[{"role": "user", "content": "Hello!"}]
+  )
+  print(response.choices[0].message.content)
+  #+end_src
+
+- *HTTPS (self-signed certificate):*
+  #+begin_src python
+  from openai import OpenAI
+  import httpx
+
+  client = OpenAI(
+      base_url="https://localhost:12443/v1",
+      api_key="any-key-here",
+      http_client=httpx.Client(verify=False)  # Accept self-signed cert
+  )
+
+  response = client.chat.completions.create(
+      model="gpt-4o-mini",
+      messages=[{"role": "user", "content": "Hello!"}]
+  )
+  print(response.choices[0].message.content)
+  #+end_src
+
+* Common Issues
+
+1. *"Invalid HTTP request received"*
+   - If running HTTP-only mode: client is using HTTPS on HTTP port
+   - *Solution*: Run with ~--ssl~ or ~--ssl-only~ to enable HTTPS
+   - Or ensure client uses correct protocol for the selected mode
+
+2. *502 Bad Gateway*
+   - Check environment variables are set
+   - Verify Circuit credentials are valid
+
+3. *Connection refused*
+   - Ensure server is running
+   - Check firewall settings
+
+* More Examples
+
+Run the examples script for detailed request/response formats:
+#+begin_src sh
+python examples.py
+#+end_src
