@@ -1,0 +1,165 @@
+#+title: Cursor Api
+
+* Chat Completion API
+
+** Overview
+
+This document provides information on how to use the CircuIT API provided by Cisco. The API allows you to interact with the OpenAI models for generating chat completions.
+
+To use this API, you will need the following:
+
+- Okta credentials (clientid and client secret) for authentication.
+- An ~appkey~ for identifying your application.
+
+If you do not have the required credentials or appkey, please request one using the API request form.
+
+** API Endpoint
+
+- Endpoint URL: https://chat-ai.cisco.com/openai/deployments/<model name>/chat/completions
+
+** Supported Models & API Versions
+
+| Model Name       | API Version        | Context Windows                        | Available in Free Tier |
+|------------------+--------------------+----------------------------------------+------------------------|
+| gpt-4.1          | 2025-04-01-preview | 120K Tokens (Free Tier), 1M Tokens Pay | Yes                    |
+| gpt-4o-mini      | 2025-04-01-preview | 120K Tokens                            | Yes                    |
+| gpt-4o           | 2025-04-01-preview | 120K Tokens                            | Yes                    |
+| o4-mini          | 2025-04-01-preview | 200k Tokens                            | No                     |
+| o3               | 2025-04-01-preview | 200k Tokens                            | No                     |
+| gemini-2.5-flash | 2025-04-01-preview | 1M Tokens                              | No                     |
+| gemini-2.5-pro   | 2025-04-01-preview | 1M Tokens                              | No                     |
+
+*** Deprecated Models
+
+These models are no longer available:
+- gpt-4
+- gpt-35-turbo
+- gpt-35-turbo-16k
+
+** Authentication
+
+The API requires authentication using an access token obtained via the OAuth2 authentication flow using your Okta credentials (clientid and client secret).
+
+*** Obtaining an Access Token (used as api-key)
+
+To obtain an access token, you can use the following cURL command:
+
+#+begin_src sh
+client_id=your_client_id
+client_secret=your_client_secret
+# Base64 encode the client_id and client_secret
+encoded_value=$(echo -n "${client_id}:${client_secret}" | base64)
+# Run the curl command
+curl --location --request POST 'https://id.cisco.com/oauth2/default/v1/token' \
+  --header 'Accept: */*' \
+  --header 'Content-Type: application/x-www-form-urlencoded' \
+  --header "Authorization: Basic ${encoded_value}" \
+  --data-urlencode 'grant_type=client_credentials'
+#+end_src
+
+To generate the <base64_encoded_value> for the 'Authorization' header, use:
+#+begin_src sh
+echo -n <client_id>:<client_secret> | base64
+#+end_src
+
+- *Note 1*: If you had requested API access, your clientid and clientsecret would have been shared with you.
+- *Note 2*: When copying from Word, extra newlines or spaces after backslashes (\) may be added. Remove these to avoid curl errors.
+- *Note 3*: The access token expires every hour and must be regenerated.
+
+**** Sample Python Code to Generate the Access Token
+
+#+begin_src python
+import requests, json
+import base64
+
+url = "https://id.cisco.com/oauth2/default/v1/token"
+payload = "grant_type=client_credentials"
+value = base64.b64encode(f'{client_id}:{client_secret}'.encode('utf-8')).decode('utf-8')
+
+headers = {
+    "Accept": "*/*",
+    "Content-Type": "application/x-www-form-urlencoded",
+    "Authorization": f"Basic {value}"
+}
+
+token_response = requests.request("POST", url, headers=headers, data=payload)
+token_data = token_response.json()
+api_key = token_data.get('access_token')
+#+end_src
+
+** Request
+
+*** Sample cURL Request
+
+#+begin_src sh
+curl --location 'https://chat-ai.cisco.com/openai/deployments/gpt-4o-mini/chat/completions' \
+  --header 'Content-Type: application/json' \
+  --header 'Accept: application/json' \
+  --header 'api-key: <access_token>' \  # use access_token from above
+  --data '{
+    "messages": [
+        { "role": "system", "content": "You are a chatbot" },
+        { "role": "user", "content": "who is the president of USA." }
+    ],
+    "user": "{\"appkey\": \"<appkey>\"}",           # Please reach out for appkey to be used
+    "stop": ["<|im_end|>"]
+}'
+#+end_src
+
+*** Request Parameters
+
+| Parameter | Type   | Description                                                      |
+|-----------+--------+------------------------------------------------------------------|
+| messages  | Array  | Array of message objects.                                        |
+| user      | string | JSON string containing the appkey information.                   |
+| stop      | Array  | Array of stopping strings. Use [""] for continuous conversation. |
+| api-key   | Header | Your access token obtained through OAuth2 authentication.        |
+
+**** messages Array
+
+- Contains message objects.
+- Each object has a ~role~ ("user" or "assistant") and ~content~ (message content).
+
+**** user JSON Object
+
+- Must include your ~appkey~.
+- May optionally include ~session_id~ and ~user~ (cec id).
+- ~appkey~ is required.
+- ~session_id~ is optional (for conversation history).
+- ~user~ is optional (to identify the user).
+
+** Response
+
+The API response will contain the chat completion generated by the GPT-3.5 Turbo model.
+
+*Note*: Replace placeholders such as <access_token> and <appkey> with actual values before making API requests.
+
+For assistance, contact the Chat AI API Webex Space.
+
+** Using OpenAI package (>1.0.0)
+
+Below is a sample using the OpenAI Python package.
+
+#+begin_src python
+# !pip install openai
+import os
+from openai import AzureOpenAI
+
+client = AzureOpenAI(
+    azure_endpoint = 'https://chat-ai.cisco.com',
+    api_key = token_response.json()["access_token"],
+    api_version = "2024-08-01-preview"
+)
+
+response = client.chat.completions.create(
+    model = "gpt-4.1",  # model = "deployment_name"
+    messages = message_with_history,
+    user = f'{{"appkey": "{app_key}"}}'
+)
+
+print(response.choices[0].message.content)
+#+end_src
+
+* Sample Jupyter Notebooks
+
+Please use the Webex Space for help if you face issues with API access or usage.
