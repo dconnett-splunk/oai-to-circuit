@@ -20,6 +20,9 @@ This project provides a minimal local webserver that acts as a translation layer
   - Moves ~model~ parameter into the deployment path segment.
   - Fetches and caches Circuit OAuth2 tokens for use as the API key.
 - Handles token refresh transparently; clients continue to use a static API key.
+- Optional *HTTPS* support with self-signed certificates (dual-mode HTTP/HTTPS).
+- Health endpoint ~GET /health~ for connectivity checks.
+- Verbose request/response logging for easy debugging.
 - Can integrate with tools such as OpenAI SDKs, Ollama, LangChain, LlamaIndex, etc.
 
 * Why?
@@ -28,33 +31,84 @@ This project provides a minimal local webserver that acts as a translation layer
 - *Simplicity*: Remove the need for complex, recurring OAuth2 token generation in every client.
 - *Interoperability*: Bridge gap between CLI tools, libraries, and Circuit's deployment-based flow.
 
+* Quick Start
+
+See [[file:QUICKSTART.org][QUICKSTART.org]] for a step-by-step setup including certificate generation, starting the server in HTTP/HTTPS modes, and example requests.
+
 * Usage
 
 1. Start the webserver locally.
 2. Point your tool’s OpenAPI endpoint and API key config to the local server.
 3. The server will translate and forward your requests to Circuit.
 
-Example ::
+HTTP example ::
 
 #+begin_src sh
 curl http://localhost:12000/v1/chat/completions \
-  -H "Authorization: Bearer static_api_key" \
-  -d '{"model": "gpt-4o-mini", "messages": ...}'
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+#+end_src
+
+HTTPS example (self-signed cert) ::
+
+#+begin_src sh
+curl -k https://localhost:12443/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
 #+end_src
 
 The server:
-- Rewrites the request to ~https://chat-ai.cisco.com/openai/deployments/gpt-4o-mini/chat/completions~
+- Rewrites the request to ~https://chat-ai.cisco.com/openai/deployments/<model>/chat/completions~
 - Inserts the correct OAuth2 token
 
 * Configuration
 
-- Provide Circuit* Okta credentials and an appkey to the server (see [[file:circuit_api.org][circuit_api.org]] for details).
-- (Optional) Set default model, port, etc. via env or command line.
+- Provide Circuit Okta credentials and an appkey (see [[file:circuit_api.org][circuit_api.org]]):
+  - ~CIRCUIT_CLIENT_ID~
+  - ~CIRCUIT_CLIENT_SECRET~
+  - ~CIRCUIT_APPKEY~
+- (Optional) Generate a development certificate:
+  #+begin_src sh
+  python generate_cert.py
+  #+end_src
+- Start the server:
+  - HTTP only: ~python rewriter.py~
+  - HTTPS only: ~python rewriter.py --ssl-only~
+  - Dual mode (HTTP + HTTPS): ~python rewriter.py --ssl~
+
+* Health Check
+
+- ~GET /health~ returns a simple JSON indicating service status and configuration flags.
+
+* Debugging
+
+- Common error: ~Invalid HTTP request received~
+  - Often caused by sending *HTTPS* to the *HTTP* endpoint.
+  - Run the diagnostic script:
+    #+begin_src sh
+    python debug_invalid_http.py
+    #+end_src
+- Server logs include detailed request headers and bodies (when safe) to aid debugging.
+
+* Tests & Examples
+
+- End-to-end tests for typical and error scenarios:
+  - ~test_requests.py~ – validates success and common error cases
+  - ~test_https.py~ – verifies HTTPS endpoints
+- Extended request/response examples:
+  - ~examples.py~ – curl and SDK examples, expected structures
 
 * Roadmap
 
 - [X] Basic translation for chat completions
 - [X] Automated and cached OAuth2 token management
+- [X] Optional HTTPS support (self-signed, dual-mode)
 - [ ] Support for additional OpenAPI methods/endpoints as needed
 
 * References
