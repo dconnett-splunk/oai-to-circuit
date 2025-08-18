@@ -1,4 +1,4 @@
-# /usr/bin/env python3
+#!/usr/bin/env python3
 
 
 import os
@@ -6,7 +6,10 @@ import base64
 import json
 import time
 import logging
+import ssl
+import argparse
 from typing import Dict, Any
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.responses import JSONResponse
 import httpx
@@ -28,7 +31,42 @@ CIRCUIT_BASE = "https://chat-ai.cisco.com"
 API_VERSION = "2025-04-01-preview"  # Or dynamically
 # --------------------------------------------------------
 
-app = FastAPI(title="OpenAI to Circuit Bridge", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handle startup and shutdown events."""
+    # Startup
+    logger.info("Starting OpenAI to Circuit Bridge server")
+    logger.info(f"Circuit base URL: {CIRCUIT_BASE}")
+    logger.info(f"API version: {API_VERSION}")
+    logger.info(
+        f"Credentials configured: {bool(CIRCUIT_CLIENT_ID and CIRCUIT_CLIENT_SECRET)}"
+    )
+    logger.info(f"App key configured: {bool(CIRCUIT_APPKEY)}")
+    
+    # Log SSL status (will be set via environment during startup)
+    if os.environ.get("SSL_MODE") == "https_only":
+        logger.info("🔒 Running in HTTPS-only mode")
+    elif os.environ.get("SSL_MODE") == "dual":
+        logger.info("🔒 Running in dual HTTP/HTTPS mode")
+    else:
+        logger.info("🔓 Running in HTTP-only mode (no SSL)")
+    
+    if not CIRCUIT_CLIENT_ID or not CIRCUIT_CLIENT_SECRET:
+        logger.warning(
+            "⚠️  Missing CIRCUIT_CLIENT_ID or CIRCUIT_CLIENT_SECRET - authentication will fail!"
+        )
+    if not CIRCUIT_APPKEY:
+        logger.warning(
+            "⚠️  Missing CIRCUIT_APPKEY - requests may be rejected by Circuit API!"
+        )
+    
+    yield
+    
+    # Shutdown
+    logger.info("Shutting down OpenAI to Circuit Bridge server")
+
+
+app = FastAPI(title="OpenAI to Circuit Bridge", version="1.0.0", lifespan=lifespan)
 
 _token_cache = {"access_token": None, "expires_at": 0}
 
@@ -173,33 +211,134 @@ async def chat_completion(request: Request):
         raise HTTPException(status_code=502, detail=f"Gateway error: {str(e)}")
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Log configuration on startup."""
-    logger.info("Starting OpenAI to Circuit Bridge server")
-    logger.info(f"Circuit base URL: {CIRCUIT_BASE}")
-    logger.info(f"API version: {API_VERSION}")
-    logger.info(
-        f"Credentials configured: {bool(CIRCUIT_CLIENT_ID and CIRCUIT_CLIENT_SECRET)}"
+# Define multiprocessing functions at module level
+def run_http(host: str, port: int):
+    """Run HTTP server."""
+    uvicorn.run(
+        "rewriter:app",
+        host=host,
+        port=port,
+        reload=False,  # Disable reload in dual mode
+        log_level="info",
+        access_log=True,
     )
-    logger.info(f"App key configured: {bool(CIRCUIT_APPKEY)}")
-    if not CIRCUIT_CLIENT_ID or not CIRCUIT_CLIENT_SECRET:
-        logger.warning(
-            "⚠️  Missing CIRCUIT_CLIENT_ID or CIRCUIT_CLIENT_SECRET - authentication will fail!"
-        )
-    if not CIRCUIT_APPKEY:
-        logger.warning(
-            "⚠️  Missing CIRCUIT_APPKEY - requests may be rejected by Circuit API!"
-        )
+
+
+def run_https(host: str, port: int, key: str, cert: str):
+    """Run HTTPS server."""
+    uvicorn.run(
+        "rewriter:app",
+        host=host,
+        port=port,
+        ssl_keyfile=key,
+        ssl_certfile=cert,
+        reload=False,  # Disable reload in dual mode
+        log_level="info",
+        access_log=True,
+    )
 
 
 if __name__ == "__main__":
-    # Run with more verbose logging
-    uvicorn.run(
-        "rewriter:app",
-        host="0.0.0.0",
-        port=12000,
-        reload=True,
-        log_level="debug",
-        access_log=True,
-    )
+    parser = argparse.ArgumentParser(description="OpenAI to Circuit Bridge Server")
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--port", type=int, default=12000, help="Port for HTTP (default: 12000)")
+    parser.add_argument("--ssl-port", type=int, default=12443, help="Port for HTTPS (default: 12443)")
+    parser.add_argument("--ssl", action="store_true", help="Enable HTTPS")
+    parser.add_argument("--ssl-only", action="store_true", help="Only run HTTPS (no HTTP)")
+    parser.add_argument("--cert", default="cert.pem", help="SSL certificate file")
+    parser.add_argument("--key", default="key.pem", help="SSL private key file")
+    parser.add_argument("--no-reload", action="store_true", help="Disable auto-reload")
+    
+    args = parser.parse_args()
+    
+    # SSL configuration
+    ssl_context = None
+    if args.ssl or args.ssl_only:
+        if not os.path.exists(args.cert) or not os.path.exists(args.key):
+            logger.error(f"SSL certificate files not found: {args.cert}, {args.key}")
+            logger.error("Run 'python generate_cert.py' to create self-signed certificates")
+            exit(1)
+        
+        ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        ssl_context.load_cert_chain(args.cert, args.key)
+        logger.info(f"SSL enabled with certificate: {args.cert}")
+    
+    # Determine which mode to run in
+    if args.ssl_only:
+        os.environ["SSL_MODE"] = "https_only"
+        # HTTPS only
+        logger.info(f"Starting HTTPS-only server on https://{args.host}:{args.ssl_port}")
+        uvicorn.run(
+            "rewriter:app",
+            host=args.host,
+            port=args.ssl_port,
+            ssl_keyfile=args.key,
+            ssl_certfile=args.cert,
+            reload=not args.no_reload,
+            log_level="debug",
+            access_log=True,
+        )
+    elif args.ssl:
+        os.environ["SSL_MODE"] = "dual"
+        # Both HTTP and HTTPS - we need to run two servers
+        logger.info(f"Starting dual-mode server:")
+        logger.info(f"  HTTP:  http://{args.host}:{args.port}")
+        logger.info(f"  HTTPS: https://{args.host}:{args.ssl_port}")
+        
+        # For dual mode, we'll use multiprocessing to run both
+        import multiprocessing
+        import signal
+        import sys
+        
+        # Set the start method to 'fork' on macOS/Linux for better compatibility
+        # On Windows, this will be ignored and 'spawn' will be used
+        try:
+            multiprocessing.set_start_method('fork')
+        except RuntimeError:
+            # Already set, ignore
+            pass
+        
+        # Handle graceful shutdown
+        processes = []
+        
+        def signal_handler(sig, frame):
+            logger.info("Shutting down servers...")
+            for p in processes:
+                p.terminate()
+            sys.exit(0)
+        
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        
+        # Start both servers
+        http_process = multiprocessing.Process(
+            target=run_http, 
+            args=(args.host, args.port)
+        )
+        https_process = multiprocessing.Process(
+            target=run_https, 
+            args=(args.host, args.ssl_port, args.key, args.cert)
+        )
+        
+        processes = [http_process, https_process]
+        
+        http_process.start()
+        https_process.start()
+        
+        # Wait for processes
+        try:
+            http_process.join()
+            https_process.join()
+        except KeyboardInterrupt:
+            signal_handler(None, None)
+    else:
+        # HTTP only (default)
+        logger.info(f"Starting HTTP-only server on http://{args.host}:{args.port}")
+        uvicorn.run(
+            "rewriter:app",
+            host=args.host,
+            port=args.port,
+            reload=not args.no_reload,
+            log_level="debug",
+            access_log=True,
+        )

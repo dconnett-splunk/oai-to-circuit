@@ -53,8 +53,8 @@ The server:
 
 * Roadmap
 
-- [ ] Basic translation for chat completions
-- [ ] Automated and cached OAuth2 token management
+- [X] Basic translation for chat completions
+- [X] Automated and cached OAuth2 token management
 - [ ] Support for additional OpenAPI methods/endpoints as needed
 
 * References
