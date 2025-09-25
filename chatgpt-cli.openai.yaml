@@ -1,0 +1,34 @@
+# Example configuration for chatgpt-cli to use the local OpenAI-to-Circuit bridge
+# Docs: https://github.com/kardolus/chatgpt-cli?tab=readme-ov-file
+
+# Provider name determines the ENV prefix (e.g., OPENAI_URL)
+name: openai
+
+# Your client will send any value here; the bridge ignores it and injects OAuth
+api_key: demo_key
+
+# Point to your local bridge server (use http to avoid self-signed cert prompts)
+url: http://localhost:12000
+
+# Standard OpenAI-style path exposed by the bridge
+completions_path: /v1/chat/completions
+
+# Auth header format that chatgpt-cli will send to the bridge
+auth_header: Authorization
+auth_token_prefix: "Bearer "
+
+# Sensible defaults for a demo
+model: gpt-4o-mini
+max_tokens: 256
+
+# Optional: turn off persistent history for quick demos
+# omit_history: true
+
+# Tip: All values can be overridden via environment variables derived from `name`.
+# For example:
+#   export OPENAI_URL=http://localhost:12000
+#   export OPENAI_COMPLETIONS_PATH=/v1/chat/completions
+#   export OPENAI_API_KEY=demo_key
+#   export OPENAI_MODEL=gpt-4o-mini
+# Then run:
+#   chatgpt "Say hello from the bridge"
