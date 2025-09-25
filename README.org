@@ -22,7 +22,7 @@ This project provides a minimal local webserver that acts as a translation layer
 - Handles token refresh transparently; clients continue to use a static API key.
 - Optional *HTTPS* support with self-signed certificates (dual-mode HTTP/HTTPS).
 - Health endpoint ~GET /health~ for connectivity checks.
-- Verbose request/response logging for easy debugging.
+- Verbose request/response logging for easy debugging (colorized; process-tagged for HTTP/HTTPS in dual mode).
 - Can integrate with tools such as OpenAI SDKs, Ollama, LangChain, LlamaIndex, etc.
 
 * Why?
@@ -81,6 +81,37 @@ The server:
   - HTTP only: ~python rewriter.py~
   - HTTPS only: ~python rewriter.py --ssl-only~
   - Dual mode (HTTP + HTTPS): ~python rewriter.py --ssl~
+
+* ChatGPT CLI (demo)
+
+- Project: [[https://github.com/kardolus/chatgpt-cli][kardolus/chatgpt-cli]]
+- Use the provided config file to point the CLI at the local bridge:
+  #+begin_src sh
+  chatgpt --config /Users/daconnet/Git/oai-to-circuit/chatgpt-cli.openai.yaml "Say hello from the bridge"
+  #+end_src
+- Or export environment variables (override config):
+  #+begin_src sh
+  export OPENAI_URL=http://localhost:12000
+  export OPENAI_COMPLETIONS_PATH=/v1/chat/completions
+  export OPENAI_API_KEY=demo_key # This is ignored, and is arbitrary.
+  export OPENAI_MODEL=gpt-4o-mini
+  chatgpt "Say hello from the bridge"
+  #+end_src
+
+* Python SDK Demo
+
+- A runnable Python example using the OpenAI SDK is included:
+  #+begin_src sh
+  python python_openai_demo.py --prompt "Say hello from the bridge"
+  #+end_src
+- HTTPS with self-signed cert:
+  #+begin_src sh
+  python python_openai_demo.py --https --insecure-skip-verify --prompt "Say hello over HTTPS"
+  #+end_src
+- Streaming tokens:
+  #+begin_src sh
+  python python_openai_demo.py --stream --prompt "Count to 5"
+  #+end_src
 
 * Health Check
 

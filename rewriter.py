@@ -6,6 +6,7 @@ import base64
 import json
 import time
 import logging
+from logging.config import dictConfig
 import ssl
 import argparse
 from typing import Dict, Any
@@ -15,10 +16,71 @@ from fastapi.responses import JSONResponse
 import httpx
 import uvicorn
 
-# Configure logging
-logging.basicConfig(
-    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+# Configure unified logging for our app, uvicorn, and asyncio
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+
+class RenameLoggerFilter(logging.Filter):
+    """Rename a logger's name in emitted records.
+
+    This helps normalize uvicorn's 'uvicorn.error' to simply 'uvicorn'.
+    """
+    def __init__(self, from_name: str, to_name: str) -> None:
+        super().__init__()
+        self.from_name = from_name
+        self.to_name = to_name
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name == self.from_name:
+            record.name = self.to_name
+        return True
+
+LOGGING_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "default": {
+            "()": "uvicorn.logging.DefaultFormatter",
+            "fmt": "%(levelprefix)s %(asctime)s - %(processName)-13s[%(process)5d] - %(name)-8s - %(message)s",
+            "use_colors": True,
+        },
+        "access": {
+            "()": "uvicorn.logging.AccessFormatter",
+            "fmt": "%(levelprefix)s %(asctime)s - %(processName)-13s[%(process)5d] - %(name)-10s - %(client_addr)s - \"%(request_line)s\" %(status_code)s",
+            "use_colors": True,
+        },
+    },
+    "handlers": {
+        "default": {
+            "class": "logging.StreamHandler",
+            "formatter": "default",
+            "stream": "ext://sys.stderr",
+            "filters": ["rename_uvicorn"],
+        },
+        "access": {
+            "class": "logging.StreamHandler",
+            "formatter": "access",
+            "stream": "ext://sys.stdout",
+        },
+    },
+    "filters": {
+        "rename_uvicorn": {
+            "()": "__main__.RenameLoggerFilter",
+            "from_name": "uvicorn.error",
+            "to_name": "uvicorn",
+        }
+    },
+    "loggers": {
+        "uvicorn": {"handlers": ["default"], "level": "INFO", "propagate": False},
+        "uvicorn.error": {"handlers": ["default"], "level": "INFO", "propagate": False},
+        "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": False},
+        "asyncio": {"handlers": ["default"], "level": "INFO", "propagate": False},
+        "__main__": {"handlers": ["default"], "level": "DEBUG", "propagate": False},
+    },
+    "root": {"handlers": ["default"], "level": "INFO"},
+}
+
+dictConfig(LOGGING_CONFIG)
 logger = logging.getLogger(__name__)
 
 # --- Config (edit these or use env vars as needed) ---
@@ -51,14 +113,12 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("🔓 Running in HTTP-only mode (no SSL)")
     
-    if not CIRCUIT_CLIENT_ID or not CIRCUIT_CLIENT_SECRET:
-        logger.warning(
-            "⚠️  Missing CIRCUIT_CLIENT_ID or CIRCUIT_CLIENT_SECRET - authentication will fail!"
-        )
+    if not CIRCUIT_CLIENT_ID:
+        logger.warning("⚠️  Missing CIRCUIT_CLIENT_ID - authentication will fail!")
+    if not CIRCUIT_CLIENT_SECRET:
+        logger.warning("⚠️  Missing CIRCUIT_CLIENT_SECRET - authentication will fail!")
     if not CIRCUIT_APPKEY:
-        logger.warning(
-            "⚠️  Missing CIRCUIT_APPKEY - requests may be rejected by Circuit API!"
-        )
+        logger.warning("⚠️  Missing CIRCUIT_APPKEY - requests may be rejected by Circuit API!")
     
     yield
     
@@ -80,10 +140,16 @@ async def get_access_token() -> str:
         return _token_cache["access_token"]
     # Get new token
     logger.info("Fetching new access token")
-    if not CIRCUIT_CLIENT_ID or not CIRCUIT_CLIENT_SECRET:
-        logger.error("Missing CIRCUIT_CLIENT_ID or CIRCUIT_CLIENT_SECRET")
+    missing: list[str] = []
+    if not CIRCUIT_CLIENT_ID:
+        missing.append("CIRCUIT_CLIENT_ID")
+    if not CIRCUIT_CLIENT_SECRET:
+        missing.append("CIRCUIT_CLIENT_SECRET")
+    if missing:
+        logger.error(f"Missing required env vars: {', '.join(missing)}")
         raise HTTPException(
-            status_code=500, detail="Server misconfigured: missing credentials"
+            status_code=500,
+            detail=f"Server misconfigured: missing {', '.join(missing)}",
         )
 
     creds = f"{CIRCUIT_CLIENT_ID}:{CIRCUIT_CLIENT_SECRET}"
@@ -287,9 +353,8 @@ if __name__ == "__main__":
         
         # For dual mode, we'll use multiprocessing to run both
         import multiprocessing
-        import signal
-        import sys
-        
+        import time
+
         # Set the start method to 'fork' on macOS/Linux for better compatibility
         # On Windows, this will be ignored and 'spawn' will be used
         try:
@@ -297,40 +362,38 @@ if __name__ == "__main__":
         except RuntimeError:
             # Already set, ignore
             pass
-        
-        # Handle graceful shutdown
+
         processes = []
-        
-        def signal_handler(sig, frame):
-            logger.info("Shutting down servers...")
-            for p in processes:
-                p.terminate()
-            sys.exit(0)
-        
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
-        
-        # Start both servers
+
         http_process = multiprocessing.Process(
-            target=run_http, 
-            args=(args.host, args.port)
+            target=run_http,
+            args=(args.host, args.port),
+            daemon=True,
+            name="bridge-http"
         )
         https_process = multiprocessing.Process(
-            target=run_https, 
-            args=(args.host, args.ssl_port, args.key, args.cert)
+            target=run_https,
+            args=(args.host, args.ssl_port, args.key, args.cert),
+            daemon=True,
+            name="bridge-https"
         )
-        
+
         processes = [http_process, https_process]
-        
-        http_process.start()
-        https_process.start()
-        
-        # Wait for processes
+
+        for p in processes:
+            p.start()
+
         try:
-            http_process.join()
-            https_process.join()
+            # Monitor until both processes exit or interrupted
+            while any(p.is_alive() for p in processes):
+                time.sleep(0.5)
         except KeyboardInterrupt:
-            signal_handler(None, None)
+            logger.info("Shutting down servers...")
+            for p in processes:
+                if p.is_alive():
+                    p.terminate()
+            for p in processes:
+                p.join(timeout=5.0)
     else:
         # HTTP only (default)
         logger.info(f"Starting HTTP-only server on http://{args.host}:{args.port}")
