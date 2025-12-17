@@ -9,12 +9,13 @@ import logging
 from logging.config import dictConfig
 import ssl
 import argparse
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.responses import JSONResponse
 import httpx
 import uvicorn
+from quota import QuotaManager, load_quotas_from_env_or_file
 
 # Configure unified logging for our app, uvicorn, and asyncio
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -93,6 +94,25 @@ CIRCUIT_BASE = "https://chat-ai.cisco.com"
 API_VERSION = "2025-04-01-preview"  # Or dynamically
 # --------------------------------------------------------
 
+# Quotas / subkey configuration
+QUOTA_DB_PATH = os.environ.get("QUOTA_DB_PATH", "quota.db")
+REQUIRE_SUBKEY = os.environ.get("REQUIRE_SUBKEY", "true").lower() in ("1", "true", "yes")
+_quota_manager: Optional[QuotaManager] = None
+
+
+def extract_subkey(request: Request) -> Optional[str]:
+    """Extract a caller subkey from headers."""
+    # Prefer explicit header
+    subkey = request.headers.get("X-Bridge-Subkey")
+    if subkey:
+        return subkey.strip()
+    # Fallback to Authorization: Bearer <token>
+    auth = request.headers.get("Authorization") or request.headers.get("authorization")
+    if auth and auth.lower().startswith("bearer "):
+        return auth.split(" ", 1)[1].strip()
+    return None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle startup and shutdown events."""
@@ -120,6 +140,12 @@ async def lifespan(app: FastAPI):
     if not CIRCUIT_APPKEY:
         logger.warning("⚠️  Missing CIRCUIT_APPKEY - requests may be rejected by Circuit API!")
     
+    # Initialize quotas
+    global _quota_manager
+    quotas_cfg = load_quotas_from_env_or_file()
+    _quota_manager = QuotaManager(db_path=QUOTA_DB_PATH, quotas=quotas_cfg)
+    logger.info(f"Quotas enabled: {bool(quotas_cfg)} (db={QUOTA_DB_PATH}, require_subkey={REQUIRE_SUBKEY})")
+
     yield
     
     # Shutdown
@@ -215,6 +241,19 @@ async def chat_completion(request: Request):
 
     logger.info(f"Processing request for model: {model}")
 
+    # Subkey extraction and quota pre-check
+    caller_subkey = extract_subkey(request)
+    if REQUIRE_SUBKEY and not caller_subkey:
+        raise HTTPException(
+            status_code=401,
+            detail="Subkey required. Provide 'Authorization: Bearer <subkey>' or 'X-Bridge-Subkey' header.",
+        )
+    # If quotas configured and subkey present, enforce request-count limit before upstream call
+    if caller_subkey and _quota_manager:
+        if not _quota_manager.is_request_allowed(caller_subkey, model):
+            logger.warning(f"Quota exceeded (requests) for subkey={caller_subkey} model={model}")
+            raise HTTPException(status_code=429, detail="Quota exceeded for this subkey and model (requests)")
+
     # Insert appkey if not present
     user_field = req_data.get("user")
     if not user_field:
@@ -256,7 +295,32 @@ async def chat_completion(request: Request):
     try:
         async with httpx.AsyncClient(timeout=90) as client:
             r = await client.post(target_url, json=req_data, headers=headers)
-
+        # Record usage after response (if subkey present)
+        if caller_subkey and _quota_manager:
+            prompt_tokens = 0
+            completion_tokens = 0
+            total_tokens = 0
+            try:
+                # Only parse JSON for usage if content-type indicates JSON
+                ct = (r.headers.get("content-type") or "").lower()
+                if "application/json" in ct and r.content:
+                    payload = r.json()
+                    usage = payload.get("usage") if isinstance(payload, dict) else None
+                    if isinstance(usage, dict):
+                        prompt_tokens = int(usage.get("prompt_tokens") or 0)
+                        completion_tokens = int(usage.get("completion_tokens") or 0)
+                        total_tokens = int(usage.get("total_tokens") or (prompt_tokens + completion_tokens))
+            except Exception:
+                # Swallow parsing issues; still record request count
+                pass
+            _quota_manager.record_usage(
+                subkey=caller_subkey,
+                model=model,
+                request_inc=1,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+            )
         logger.info(f"Circuit API response: {r.status_code}")
         if r.status_code >= 400:
             logger.error(f"Circuit API error response: {r.text}")

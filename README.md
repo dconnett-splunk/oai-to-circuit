@@ -46,6 +46,27 @@ Set the following environment variables (see `circuit_api.org`):
 - `CIRCUIT_CLIENT_SECRET`
 - `CIRCUIT_APPKEY`
 
+Optional quotas and subkeys:
+- `REQUIRE_SUBKEY` (default: `true`) – require a caller subkey per request
+- `QUOTA_DB_PATH` (default: `quota.db`) – SQLite file for usage tracking
+- `QUOTAS_JSON` – inline JSON mapping subkey→model→limits
+- `QUOTAS_JSON_PATH` (default: `quotas.json`) – file to load quotas from if `QUOTAS_JSON` not set
+
+Caller subkey is read from either header `X-Bridge-Subkey: <subkey>` or `Authorization: Bearer <subkey>`. The subkey is NOT forwarded to Circuit; it is only used locally for per-model quotas and usage tracking.
+
+Example `quotas.json`:
+```json
+{
+  "team-alpha": {
+    "gpt-4o-mini": { "requests": 1000, "total_tokens": 500000 },
+    "*": { "requests": 5000 }
+  },
+  "user-123": {
+    "gpt-4o": { "total_tokens": 100000 }
+  }
+}
+```
+
 Optional: generate a development certificate:
 ```bash
 python generate_cert.py
@@ -90,6 +111,15 @@ python python_openai_demo.py --stream --prompt "Count to 5"
 ## Health Check
 
 `GET /health` returns service status and configuration flags.
+
+## Subkey Quotas
+
+- Provide a subkey per request via `Authorization: Bearer <subkey>` or `X-Bridge-Subkey: <subkey>`.
+- Limits are enforced per subkey and per model. Supported limits:
+  - `requests`: total number of requests allowed
+  - `total_tokens`: sum of returned usage.total_tokens (if present)
+- When a request would exceed a configured `requests` limit, the bridge returns `429 Too Many Requests`.
+- Token limits are applied after responses are received and recorded. Once the limit is reached, subsequent requests are rejected.
 
 ## Debugging
 
