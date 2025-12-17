@@ -13,73 +13,45 @@
 ## Architecture Overview
 
 ```mermaid
-graph TB
-    subgraph "External Clients"
-        Client[Client<br/>OpenAI SDK / curl / CLI]
-    end
+flowchart LR
+    Client[Client<br/>OpenAI SDK/CLI]
     
-    subgraph "Bridge Server (oai-to-circuit)"
-        subgraph "Entry Point"
-            Rewriter[rewriter.py<br/>CLI wrapper]
-            Server[server.py<br/>uvicorn startup<br/>HTTP/HTTPS/Dual]
+    subgraph Bridge["Bridge Server"]
+        direction TB
+        Entry[rewriter.py]
+        Server[server.py<br/>uvicorn]
+        App[app.py<br/>FastAPI]
+        
+        subgraph Processing["Request Processing"]
+            Subkey[Subkey<br/>Extraction]
+            Quota[Quota<br/>Manager]
+            OAuth[OAuth<br/>Token Cache]
         end
         
-        subgraph "Core Application (oai_to_circuit/)"
-            App[app.py<br/>FastAPI endpoints<br/>/health, /v1/chat/completions]
-            Config[config.py<br/>Environment variables<br/>Configuration dataclass]
-            Logging[logging_config.py<br/>Unified logging<br/>Colorized output]
-            
-            subgraph "Request Processing"
-                SubkeyExtract[extract_subkey<br/>Header parsing]
-                QuotaMgr[quota.py<br/>QuotaManager<br/>SQLite tracking]
-                OAuth[oauth.py<br/>TokenCache<br/>get_access_token]
-            end
-        end
+        Entry --> Server --> App
+        App --> Processing
     end
     
-    subgraph "External Services"
-        IdP[Cisco IdP<br/>id.cisco.com<br/>OAuth2 Token Endpoint]
-        Circuit[Circuit Chat API<br/>chat-ai.cisco.com<br/>/openai/deployments/...]
-    end
+    QuotaDB[(quota.db)]
+    IdP[Cisco IdP<br/>OAuth2]
+    Circuit[Circuit API]
     
-    subgraph "Persistent Storage"
-        QuotaDB[(quota.db<br/>SQLite<br/>Usage tracking)]
-    end
+    Client -->|1. Request| App
+    App -->|2. Check| Quota
+    Quota <-->|Read/Write| QuotaDB
+    App -->|3. Get Token| OAuth
+    OAuth -.->|Refresh| IdP
+    App -->|4. Forward| Circuit
+    Circuit -->|5. Response| App
+    App -->|6. Return| Client
     
-    Client -->|"1. POST /v1/chat/completions<br/>model, messages<br/>X-Bridge-Subkey or<br/>Authorization: Bearer"| App
-    Client -.->|"GET /health"| App
-    
-    Rewriter --> Server
-    Server --> App
-    Server --> Config
-    Server --> Logging
-    
-    App --> SubkeyExtract
-    SubkeyExtract -->|"Check quota"| QuotaMgr
-    QuotaMgr <-->|"Read/write usage"| QuotaDB
-    
-    App -->|"2. Get cached token<br/>or fetch new"| OAuth
-    OAuth -.->|"3. POST /oauth2/token<br/>(if expired)<br/>grant_type=client_credentials<br/>Basic auth"| IdP
-    IdP -.->|"access_token<br/>expires_in"| OAuth
-    
-    App -->|"4. Forward request<br/>api-key: <token><br/>user: {appkey: ...}<br/>/deployments/{model}"| Circuit
-    Circuit -->|"5. Response<br/>usage: {total_tokens, ...}"| App
-    
-    App -->|"6. Record usage"| QuotaMgr
-    App -->|"7. Return response"| Client
-    
-    Config -.->|"CIRCUIT_CLIENT_ID<br/>CIRCUIT_CLIENT_SECRET<br/>CIRCUIT_APPKEY"| OAuth
-    Config -.->|"QUOTAS_JSON<br/>REQUIRE_SUBKEY"| QuotaMgr
-    
-    classDef external fill:#e1f5ff,stroke:#01579b
-    classDef bridge fill:#fff3e0,stroke:#e65100
-    classDef storage fill:#f3e5f5,stroke:#4a148c
-    classDef entrypoint fill:#fff9c4,stroke:#f57f17
+    classDef external fill:#e1f5ff,stroke:#01579b,stroke-width:2px
+    classDef internal fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef data fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
     
     class Client,IdP,Circuit external
-    class App,Config,Logging,SubkeyExtract,QuotaMgr,OAuth bridge
-    class QuotaDB storage
-    class Rewriter,Server entrypoint
+    class Entry,Server,App,Subkey,Quota,OAuth internal
+    class QuotaDB data
 ```
 
 ### Request Flow
