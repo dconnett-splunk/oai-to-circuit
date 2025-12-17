@@ -10,39 +10,107 @@
 - Runs HTTP, HTTPS (self-signed), or dual-mode servers.
 
 
-## High-level data flow
+## Architecture Overview
 
-Client (OpenAI-style) → Bridge (`rewriter.py`) → OAuth2 (Cisco IdP) → Circuit Chat API → Bridge → Client
-
-```text
-+----------------------+       +----------------------+       +------------------------+
-|      Client          |  1    |   OpenAI-style       |  4    |   Circuit Chat API     |
-|  (SDK/curl/CLI)      +------->  Bridge (FastAPI)    +------->  /openai/deployments/...|
-|                      |       |    /v1/chat/complet. |       |   (api-version=...)    |
-+----------+-----------+       +----------+-----------+       +-----------+------------+
-           ^                              | (2a)  | (2)                    |
-           | (5)                          v        v                        |
-           |                    Quota Manager     OAuth2 Token Cache        |
-           |               (SQLite; per-subkey/model)   (in-memory)         |
-           |                          | (5a)                                |
-           |                          +-------------------------------------+
-           |                                  |                            |
-           |                                  v (3)                        |
-           |                          Cisco IdP (Token)                    |
-           +----------------------------------------------------------------
+```mermaid
+graph TB
+    subgraph "External Clients"
+        Client[Client<br/>OpenAI SDK / curl / CLI]
+    end
+    
+    subgraph "Bridge Server (oai-to-circuit)"
+        subgraph "Entry Point"
+            Rewriter[rewriter.py<br/>CLI wrapper]
+            Server[server.py<br/>uvicorn startup<br/>HTTP/HTTPS/Dual]
+        end
+        
+        subgraph "Core Application (oai_to_circuit/)"
+            App[app.py<br/>FastAPI endpoints<br/>/health, /v1/chat/completions]
+            Config[config.py<br/>Environment variables<br/>Configuration dataclass]
+            Logging[logging_config.py<br/>Unified logging<br/>Colorized output]
+            
+            subgraph "Request Processing"
+                SubkeyExtract[extract_subkey<br/>Header parsing]
+                QuotaMgr[quota.py<br/>QuotaManager<br/>SQLite tracking]
+                OAuth[oauth.py<br/>TokenCache<br/>get_access_token]
+            end
+        end
+    end
+    
+    subgraph "External Services"
+        IdP[Cisco IdP<br/>id.cisco.com<br/>OAuth2 Token Endpoint]
+        Circuit[Circuit Chat API<br/>chat-ai.cisco.com<br/>/openai/deployments/...]
+    end
+    
+    subgraph "Persistent Storage"
+        QuotaDB[(quota.db<br/>SQLite<br/>Usage tracking)]
+    end
+    
+    Client -->|"1. POST /v1/chat/completions<br/>model, messages<br/>X-Bridge-Subkey or<br/>Authorization: Bearer"| App
+    Client -.->|"GET /health"| App
+    
+    Rewriter --> Server
+    Server --> App
+    Server --> Config
+    Server --> Logging
+    
+    App --> SubkeyExtract
+    SubkeyExtract -->|"Check quota"| QuotaMgr
+    QuotaMgr <-->|"Read/write usage"| QuotaDB
+    
+    App -->|"2. Get cached token<br/>or fetch new"| OAuth
+    OAuth -.->|"3. POST /oauth2/token<br/>(if expired)<br/>grant_type=client_credentials<br/>Basic auth"| IdP
+    IdP -.->|"access_token<br/>expires_in"| OAuth
+    
+    App -->|"4. Forward request<br/>api-key: <token><br/>user: {appkey: ...}<br/>/deployments/{model}"| Circuit
+    Circuit -->|"5. Response<br/>usage: {total_tokens, ...}"| App
+    
+    App -->|"6. Record usage"| QuotaMgr
+    App -->|"7. Return response"| Client
+    
+    Config -.->|"CIRCUIT_CLIENT_ID<br/>CIRCUIT_CLIENT_SECRET<br/>CIRCUIT_APPKEY"| OAuth
+    Config -.->|"QUOTAS_JSON<br/>REQUIRE_SUBKEY"| QuotaMgr
+    
+    classDef external fill:#e1f5ff,stroke:#01579b
+    classDef bridge fill:#fff3e0,stroke:#e65100
+    classDef storage fill:#f3e5f5,stroke:#4a148c
+    classDef entrypoint fill:#fff9c4,stroke:#f57f17
+    
+    class Client,IdP,Circuit external
+    class App,Config,Logging,SubkeyExtract,QuotaMgr,OAuth bridge
+    class QuotaDB storage
+    class Rewriter,Server entrypoint
 ```
 
-1) Client sends OpenAI-format request to `/v1/chat/completions` (HTTP or HTTPS).  
-2) Bridge ensures a valid OAuth2 token (client credentials) via in-memory cache.  
-3) If needed, fetch token from `https://id.cisco.com/oauth2/default/v1/token`.  
-4) Bridge rewrites and forwards to Circuit: `https://chat-ai.cisco.com/openai/deployments/{model}/chat/completions?api-version=2025-04-01-preview` with headers/body adjusted.  
-5) Response from Circuit is returned to the client (as a single response body).  
+### Request Flow
 
-Subkey and quota handling:
-- The client includes an identifying subkey via `Authorization: Bearer <subkey>` or `X-Bridge-Subkey: <subkey>`.
-- The bridge enforces per-subkey, per-model quotas (requests and/or tokens) using a local `quota.db` (SQLite).
-- If a configured request limit has been reached for a subkey/model, the bridge returns `429` before forwarding.
-- After the upstream response, token usage is recorded if the response includes `usage.total_tokens`.
+1. **Client Request**: Client sends OpenAI-format request to `/v1/chat/completions` (HTTP or HTTPS)
+   - Includes `model` parameter and OpenAI-style payload
+   - Provides subkey via `X-Bridge-Subkey` header or `Authorization: Bearer <subkey>`
+
+2. **Subkey & Quota Check**: 
+   - `extract_subkey()` parses headers to identify caller
+   - `QuotaManager` checks if request is allowed based on configured limits
+   - Returns `429` if quota exceeded; otherwise continues
+
+3. **OAuth Token Management**:
+   - `get_access_token()` checks in-memory `TokenCache`
+   - If expired (< 60s remaining), fetches new token from Cisco IdP
+   - Uses client credentials flow with `CIRCUIT_CLIENT_ID` and `CIRCUIT_CLIENT_SECRET`
+
+4. **Request Transformation**:
+   - Injects `CIRCUIT_APPKEY` into `user` field
+   - Rewrites URL to: `https://chat-ai.cisco.com/openai/deployments/{model}/chat/completions?api-version=2025-04-01-preview`
+   - Sets `api-key` header with OAuth2 access token
+
+5. **Forward to Circuit**: Bridge proxies transformed request to Circuit API
+
+6. **Response Handling**:
+   - Receives response from Circuit (may include `usage.total_tokens`)
+   - Records token usage in `quota.db` for subkey tracking
+   - Returns raw response to client
+
+7. **Quota Tracking**: Post-response usage data stored in SQLite for enforcement
 
 
 ## Components
