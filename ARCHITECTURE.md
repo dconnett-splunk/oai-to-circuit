@@ -47,15 +47,40 @@ Subkey and quota handling:
 
 ## Components
 
-- `rewriter.py`: FastAPI application and server entrypoint.
+### Core Package (`oai_to_circuit/`)
+
+- `server.py`: Server entrypoint with CLI argument parsing and uvicorn startup (HTTP/HTTPS/dual-mode).
+- `app.py`: FastAPI application factory and endpoint handlers.
   - Endpoints: `/health`, `/v1/chat/completions`
-  - OAuth2 token acquisition and in-memory caching
-  - Request rewrite/proxy to Circuit
-  - Structured, colorized logging; dual-mode startup logic (HTTP/HTTPS)
-- `quota.py`: QuotaManager for per-subkey, per-model usage tracking (SQLite) and limits loaded from env/JSON.
-- `generate_cert.py`: Dev-only self-signed certificate generator.
-- `examples.py`, `python_openai_demo.py`: Usage examples for curl/OpenAI SDK.
-- `test_requests.py`, `test_https.py`, `debug_invalid_http.py`: Validation and troubleshooting tools.
+  - Request rewrite/proxy to Circuit with quota enforcement
+  - Subkey extraction from headers
+- `oauth.py`: OAuth2 client credentials flow with in-memory token caching.
+- `quota.py`: QuotaManager for per-subkey, per-model usage tracking (SQLite) and quota loading from env/JSON.
+- `config.py`: Configuration dataclass and environment variable loading.
+- `logging_config.py`: Unified logging configuration with colorized output and logger renaming filters.
+
+### Entry Points
+
+- `rewriter.py`: Thin wrapper that imports and starts the server from `oai_to_circuit.server`.
+
+### Development Tools
+
+- `generate_cert.py`: Self-signed certificate generator for local HTTPS development.
+- `examples.py`, `python_openai_demo.py`: Usage examples demonstrating curl and OpenAI SDK integration.
+- `debug_invalid_http.py`: Diagnostics script for troubleshooting common connection issues.
+
+### Tests (`tests/`)
+
+- `test_quota.py`: QuotaManager request/token limit enforcement.
+- `test_quota_loading.py`: Quota configuration loading from env/file.
+- `test_subkey_extraction.py`: Header parsing for caller subkey identification.
+- `test_requests.py`: End-to-end FastAPI endpoint behavior (health, chat completions, error cases).
+- `test_config.py`: Environment variable and default configuration loading.
+- `test_oauth.py`: Token caching, expiry, and missing credential handling.
+- `test_logging_config.py`: Logger renaming filter behavior.
+- `test_https.py`: Server SSL configuration validation.
+
+Run tests with: `pytest`
 
 
 ## Endpoint behavior
@@ -161,15 +186,28 @@ The `/health` endpoint returns JSON including `credentials_configured` and `appk
 - Token cache scope: In dual mode or multi-replica deployments, caches are per-process and not shared.
 - Quota persistence: Usage is stored in a local SQLite file; in multi-instance deployments, use a shared database or external store for consistent enforcement.
 
+## Refactor notes / future improvements (no behavior changes in this pass)
+
+- **Streaming**: Implement true SSE/chunked passthrough when `stream=true` instead of returning a buffered body.
+- **Quota semantics**: Add time windows (daily/monthly), shared backing store (Redis/Postgres), and optional preflight token limits.
+- **Authn/z**: Consider separating “subkey identity” from client `Authorization` to avoid confusion with upstream auth conventions.
+- **Observability**: Add request IDs and structured JSON logs; consider metrics for quota usage and upstream latency.
+- **Config**: Validate required env vars on startup; support `.env` loading explicitly (currently dependency exists but not wired).
+
 
 ## File map (key sources)
 
-- `rewriter.py`: FastAPI app, endpoints, OAuth, proxying, startup modes.
-- `quota.py`: Per-subkey quota enforcement and usage tracking.
+- `oai_to_circuit/server.py`: Server startup and CLI handling.
+- `oai_to_circuit/app.py`: FastAPI app factory, endpoints, request proxying.
+- `oai_to_circuit/oauth.py`: OAuth2 token acquisition and caching.
+- `oai_to_circuit/quota.py`: Per-subkey quota enforcement and usage tracking.
+- `oai_to_circuit/config.py`: Configuration management.
+- `oai_to_circuit/logging_config.py`: Logging configuration.
+- `rewriter.py`: Main entry point (thin wrapper).
 - `generate_cert.py`: RSA 2048 + SHA-256 self-signed certificate generator for development.
 - `examples.py`, `python_openai_demo.py`: Usage examples (curl, OpenAI SDK).
-- `test_requests.py`, `test_https.py`: Sanity checks and connectivity validations.
-- `debug_invalid_http.py`: Diagnostics for “Invalid HTTP request received” scenarios.
+- `tests/`: Comprehensive unit test suite (run with `pytest`).
+- `debug_invalid_http.py`: Diagnostics for "Invalid HTTP request received" scenarios.
 
 
 ## Frequently used URLs

@@ -131,9 +131,23 @@ python debug_invalid_http.py
 
 ## Tests & Examples
 
-- `test_requests.py` – typical and error scenarios
-- `test_https.py` – HTTPS verification
+Run the full test suite:
+```bash
+pytest
+```
+
+Individual test modules in `tests/`:
+- `test_quota.py` – quota enforcement and usage tracking
+- `test_requests.py` – endpoint behavior and error scenarios
+- `test_subkey_extraction.py` – header parsing
+- `test_oauth.py` – token caching and authentication
+- `test_config.py` – configuration loading
+- `test_https.py` – SSL configuration validation
+
+Usage examples:
 - `examples.py` – curl and SDK examples
+- `python_openai_demo.py` – Python OpenAI SDK integration
+- `debug_invalid_http.py` – connection diagnostics
 
 ## References
 

@@ -16,7 +16,7 @@ This project provides a minimal local webserver that acts as a translation layer
 
 - Exposes a standard OpenAPI-compatible endpoint (e.g., ~POST /v1/chat/completions~).
 - Accepts requests with a ~model~ parameter and static API key (compatible with typical OpenAPI tools).
-- Converts requests to Circuit’s required format:
+- Converts requests to Circuit's required format:
   - Moves ~model~ parameter into the deployment path segment.
   - Fetches and caches Circuit OAuth2 tokens for use as the API key.
 - Handles token refresh transparently; clients continue to use a static API key.
@@ -38,7 +38,7 @@ See [[file:QUICKSTART.org][QUICKSTART.org]] for a step-by-step setup including c
 * Usage
 
 1. Start the webserver locally.
-2. Point your tool’s OpenAPI endpoint and API key config to the local server.
+2. Point your tool's OpenAPI endpoint and API key config to the local server.
 3. The server will translate and forward your requests to Circuit.
 
 HTTP example ::
@@ -129,11 +129,23 @@ The server:
 
 * Tests & Examples
 
-- End-to-end tests for typical and error scenarios:
-  - ~test_requests.py~ – validates success and common error cases
-  - ~test_https.py~ – verifies HTTPS endpoints
-- Extended request/response examples:
-  - ~examples.py~ – curl and SDK examples, expected structures
+Run the full test suite:
+#+begin_src sh
+pytest
+#+end_src
+
+Individual test modules in ~tests/~:
+- ~test_quota.py~ – quota enforcement and usage tracking
+- ~test_requests.py~ – endpoint behavior and error scenarios
+- ~test_subkey_extraction.py~ – header parsing
+- ~test_oauth.py~ – token caching and authentication
+- ~test_config.py~ – configuration loading
+- ~test_https.py~ – SSL configuration validation
+
+Usage examples:
+- ~examples.py~ – curl and SDK examples
+- ~python_openai_demo.py~ – Python OpenAI SDK integration
+- ~debug_invalid_http.py~ – connection diagnostics
 
 * Roadmap
 
