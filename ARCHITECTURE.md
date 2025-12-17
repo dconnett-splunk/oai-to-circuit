@@ -51,16 +51,6 @@ flowchart LR
     Rewriter -->|"4. Circuit Format<br/>/openai/deployments/{model}/..."| Circuit
     Circuit -->|5. Response| App
     App -->|6. Return| Client
-    
-    classDef external fill:#e1f5ff,stroke:#01579b,stroke-width:2px
-    classDef internal fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    classDef transform fill:#c8e6c9,stroke:#1b5e20,stroke-width:2px
-    classDef data fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
-    
-    class Client,IdP,Circuit external
-    class Entry,Server,App,Subkey,Quota,OAuth internal
-    class Rewriter transform
-    class QuotaDB data
 ```
 
 ### Request Flow
