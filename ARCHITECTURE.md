@@ -176,6 +176,93 @@ Run tests with: `pytest`
 Security note (No Hardcoded Credentials policy): This project reads sensitive values from environment variables and never commits credentials to source. Ensure your deployment uses a proper secret manager (e.g., environment injection from your orchestrator) and never embeds secrets in code, images, or logs.
 
 
+## Per-Model Quotas and Model Blacklisting
+
+The quota system supports **per-model quotas**, allowing you to:
+- Set different limits for each model (e.g., restrict expensive models like `gpt-4` or `o1-preview`)
+- **Blacklist models entirely** by setting their quota to `0`
+- Use wildcard `"*"` to set default limits for all models
+- Override wildcard limits with specific model configurations
+
+### Quota Configuration Format
+
+Quotas are defined in JSON format: `subkey` → `model` → `limits`
+
+```json
+{
+  "team_member_alice": {
+    "gpt-4": {"requests": 0},           // Blacklisted - too expensive
+    "o1-preview": {"requests": 0},      // Blacklisted - too expensive
+    "gpt-4o": {"requests": 10},         // Limited use for expensive model
+    "gpt-4o-mini": {"requests": 1000},  // High quota for cheap model
+    "*": {"requests": 100}              // Default for any other model
+  },
+  "team_member_bob": {
+    "gpt-4o-mini": {
+      "requests": 500,
+      "total_tokens": 100000
+    },
+    "*": {"requests": 50}
+  }
+}
+```
+
+### How Model Blacklisting Works
+
+To blacklist a model (prevent all access), set `requests: 0`:
+
+```json
+{
+  "subkey1": {
+    "gpt-4": {"requests": 0},        // Completely blocked
+    "o1-preview": {"requests": 0},   // Completely blocked
+    "*": {"requests": 100}           // Other models allowed
+  }
+}
+```
+
+When a user tries to use a blacklisted model, they receive `HTTP 429` with the message: `"Quota exceeded for this subkey and model (requests)"`
+
+### Limit Types
+
+- `requests`: Maximum number of API calls (set to `0` to blacklist)
+- `total_tokens`: Maximum total tokens (sum of prompt + completion tokens)
+- `prompt_tokens`: Maximum prompt tokens (not currently enforced, future use)
+- `completion_tokens`: Maximum completion tokens (not currently enforced, future use)
+
+### Model-Specific vs Wildcard Limits
+
+- Specific model limits **override** wildcard `"*"` limits
+- If no limit is set for a model, wildcard limits apply
+- If no wildcard exists and no model-specific limit exists, requests are **allowed** (unlimited)
+
+Example:
+```json
+{
+  "user1": {
+    "*": {"requests": 1000},         // Default: 1000 requests for any model
+    "gpt-4o": {"requests": 20}       // Override: only 20 for this expensive model
+  }
+}
+```
+
+### Loading Quotas
+
+Set quotas via environment variable or file:
+
+**Option 1: Environment variable (inline JSON)**
+```bash
+export QUOTAS_JSON='{"alice": {"gpt-4": {"requests": 0}, "*": {"requests": 100}}}'
+```
+
+**Option 2: File (recommended for complex configs)**
+```bash
+export QUOTAS_JSON_PATH="/path/to/quotas.json"
+```
+
+If `QUOTAS_JSON` is not set, the bridge looks for `quotas.json` in the current directory (or path specified by `QUOTAS_JSON_PATH`).
+
+
 ## HTTPS and certificates
 
 - Modes:

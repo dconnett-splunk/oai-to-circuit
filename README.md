@@ -54,18 +54,24 @@ Optional quotas and subkeys:
 
 Caller subkey is read from either header `X-Bridge-Subkey: <subkey>` or `Authorization: Bearer <subkey>`. The subkey is NOT forwarded to Circuit; it is only used locally for per-model quotas and usage tracking.
 
-Example `quotas.json`:
+Example `quotas.json` (with model blacklisting):
 ```json
 {
   "team-alpha": {
+    "gpt-4": { "requests": 0 },          // Blacklisted - too expensive
+    "o1-preview": { "requests": 0 },     // Blacklisted - too expensive
     "gpt-4o-mini": { "requests": 1000, "total_tokens": 500000 },
-    "*": { "requests": 5000 }
+    "*": { "requests": 100 }
   },
-  "user-123": {
-    "gpt-4o": { "total_tokens": 100000 }
+  "power-user-123": {
+    "gpt-4o": { "requests": 50, "total_tokens": 100000 },
+    "gpt-4o-mini": { "requests": 5000 },
+    "*": { "requests": 1000 }
   }
 }
 ```
+
+See `quotas.json.example` for more examples including full model blacklisting scenarios.
 
 Optional: generate a development certificate:
 ```bash
@@ -112,14 +118,26 @@ python python_openai_demo.py --stream --prompt "Count to 5"
 
 `GET /health` returns service status and configuration flags.
 
-## Subkey Quotas
+## Subkey Quotas and Model Blacklisting
 
 - Provide a subkey per request via `Authorization: Bearer <subkey>` or `X-Bridge-Subkey: <subkey>`.
-- Limits are enforced per subkey and per model. Supported limits:
-  - `requests`: total number of requests allowed
+- Limits are enforced **per subkey and per model**. Supported limits:
+  - `requests`: total number of requests allowed (set to `0` to **blacklist a model**)
   - `total_tokens`: sum of returned usage.total_tokens (if present)
-- When a request would exceed a configured `requests` limit, the bridge returns `429 Too Many Requests`.
-- Token limits are applied after responses are received and recorded. Once the limit is reached, subsequent requests are rejected.
+- **Blacklist expensive models** by setting their `requests` quota to `0`:
+  ```json
+  {
+    "team_member": {
+      "gpt-4": {"requests": 0},        // Completely blocked
+      "o1-preview": {"requests": 0},   // Completely blocked
+      "gpt-4o-mini": {"requests": 1000},  // Allowed
+      "*": {"requests": 100}           // Default for other models
+    }
+  }
+  ```
+- Model-specific limits **override** wildcard `"*"` limits
+- When a request exceeds a quota or uses a blacklisted model, the bridge returns `429 Too Many Requests`.
+- See `quotas.json.example` for a complete configuration template.
 
 ## Debugging
 
