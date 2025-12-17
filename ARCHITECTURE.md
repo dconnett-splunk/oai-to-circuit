@@ -2,12 +2,16 @@
 
 ### What this bridge does
 
-- Translates OpenAI-compatible requests to Cisco Circuit’s deployment-based API.
+- **Rewrites OpenAI-format requests into Circuit's deployment-based API format**
+  - Accepts OpenAI-compatible requests at `/v1/chat/completions`
+  - Transforms URL structure: `/v1/chat/completions` → `/openai/deployments/{model}/chat/completions?api-version=...`
+  - Translates authentication from OpenAI API keys to Circuit OAuth2 tokens
+  - Injects Circuit-specific metadata (appkey)
 - Exposes a minimal surface:
-  - POST `/v1/chat/completions`
+  - POST `/v1/chat/completions` (OpenAI format in, Circuit format out)
   - GET `/health`
-- Obtains and caches OAuth2 access tokens, injects required metadata, and forwards requests to Circuit.
-- Runs HTTP, HTTPS (self-signed), or dual-mode servers.
+- Obtains and caches OAuth2 access tokens for Circuit authentication
+- Runs HTTP, HTTPS (self-signed), or dual-mode servers
 
 
 ## Architecture Overview
@@ -16,7 +20,7 @@
 flowchart LR
     Client[Client<br/>OpenAI SDK/CLI]
     
-    subgraph Bridge["Bridge Server"]
+    subgraph Bridge["Bridge Server - OpenAI to Circuit Translator"]
         direction TB
         Entry[rewriter.py]
         Server[server.py<br/>uvicorn]
@@ -28,29 +32,34 @@ flowchart LR
             OAuth[OAuth<br/>Token Cache]
         end
         
+        Rewriter[Request Rewriter<br/>OpenAI → Circuit]
+        
         Entry --> Server --> App
         App --> Processing
+        Processing --> Rewriter
     end
     
     QuotaDB[(quota.db)]
     IdP[Cisco IdP<br/>OAuth2]
     Circuit[Circuit API]
     
-    Client -->|1. Request| App
+    Client -->|"1. OpenAI Format<br/>/v1/chat/completions"| App
     App -->|2. Check| Quota
     Quota <-->|Read/Write| QuotaDB
     App -->|3. Get Token| OAuth
     OAuth -.->|Refresh| IdP
-    App -->|4. Forward| Circuit
+    Rewriter -->|"4. Circuit Format<br/>/openai/deployments/{model}/..."| Circuit
     Circuit -->|5. Response| App
     App -->|6. Return| Client
     
     classDef external fill:#e1f5ff,stroke:#01579b,stroke-width:2px
     classDef internal fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef transform fill:#c8e6c9,stroke:#1b5e20,stroke-width:2px
     classDef data fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
     
     class Client,IdP,Circuit external
     class Entry,Server,App,Subkey,Quota,OAuth internal
+    class Rewriter transform
     class QuotaDB data
 ```
 
@@ -70,10 +79,15 @@ flowchart LR
    - If expired (< 60s remaining), fetches new token from Cisco IdP
    - Uses client credentials flow with `CIRCUIT_CLIENT_ID` and `CIRCUIT_CLIENT_SECRET`
 
-4. **Request Transformation**:
-   - Injects `CIRCUIT_APPKEY` into `user` field
-   - Rewrites URL to: `https://chat-ai.cisco.com/openai/deployments/{model}/chat/completions?api-version=2025-04-01-preview`
-   - Sets `api-key` header with OAuth2 access token
+4. **Request Transformation (OpenAI → Circuit)**:
+   - **Incoming**: OpenAI-format request to `/v1/chat/completions` with model parameter
+   - **Rewriting**:
+     - Injects `CIRCUIT_APPKEY` into `user` field
+     - Rewrites URL from OpenAI format to Circuit deployment format:
+       - From: `/v1/chat/completions`
+       - To: `https://chat-ai.cisco.com/openai/deployments/{model}/chat/completions?api-version=2025-04-01-preview`
+     - Replaces authentication: Sets `api-key` header with OAuth2 access token
+   - **Outgoing**: Circuit-compatible request ready for forwarding
 
 5. **Forward to Circuit**: Bridge proxies transformed request to Circuit API
 
