@@ -13,7 +13,9 @@ A minimal local webserver that translates standard OpenAI-style requests into Ci
 
 ## Quick Start
 
-See `QUICKSTART.md` or `QUICKSTART.org` for step-by-step setup, including cert generation and examples.
+**Development:** See `QUICKSTART.md` or `QUICKSTART.org` for step-by-step local setup, including cert generation and examples.
+
+**Production:** See `DEPLOYMENT_QUICKSTART.md` for systemd deployment or `INSTALLATION.md` for complete installation guide.
 
 ## Usage
 
@@ -51,6 +53,13 @@ Optional quotas and subkeys:
 - `QUOTA_DB_PATH` (default: `quota.db`) – SQLite file for usage tracking
 - `QUOTAS_JSON` – inline JSON mapping subkey→model→limits
 - `QUOTAS_JSON_PATH` (default: `quotas.json`) – file to load quotas from if `QUOTAS_JSON` not set
+
+Optional Splunk HEC integration (for usage analytics):
+- `SPLUNK_HEC_URL` – Splunk HTTP Event Collector URL (e.g., `https://splunk.example.com:8088/services/collector/event`)
+- `SPLUNK_HEC_TOKEN` – Splunk HEC authentication token
+- `SPLUNK_SOURCE` (default: `oai-to-circuit`) – Event source name
+- `SPLUNK_SOURCETYPE` (default: `llm:usage`) – Event sourcetype
+- `SPLUNK_INDEX` (default: `main`) – Splunk index name
 
 Caller subkey is read from either header `X-Bridge-Subkey: <subkey>` or `Authorization: Bearer <subkey>`. The subkey is NOT forwarded to Circuit; it is only used locally for per-model quotas and usage tracking.
 
@@ -141,9 +150,39 @@ python python_openai_demo.py --stream --prompt "Count to 5"
 - When a request exceeds a quota or uses a blacklisted model, the bridge returns `429 Too Many Requests`.
 - See `quotas.json.example` for a complete configuration template.
 
+## Splunk HEC Integration
+
+When Splunk HEC is configured, the bridge automatically sends usage metrics to Splunk for analytics and monitoring:
+
+**Event Types:**
+- **Usage Events**: Sent after each successful API request with token counts
+- **Error Events**: Sent when quotas are exceeded or errors occur
+
+**Example Splunk query** to analyze usage:
+
+```spl
+index=main sourcetype=llm:usage
+| stats sum(requests) as total_requests, sum(total_tokens) as total_tokens by subkey, model
+| sort -total_tokens
+```
+
+See `INSTALLATION.md` for detailed Splunk HEC setup instructions.
+
+## Systemd Service
+
+For production deployment, use the included systemd unit file:
+
+```bash
+sudo cp oai-to-circuit.service /etc/systemd/system/
+sudo systemctl enable oai-to-circuit
+sudo systemctl start oai-to-circuit
+```
+
+See `INSTALLATION.md` for complete installation instructions.
+
 ## Debugging
 
-- Common: “Invalid HTTP request received” usually means HTTPS was sent to the HTTP port.
+- Common: "Invalid HTTP request received" usually means HTTPS was sent to the HTTP port.
 - Run diagnostics:
 ```bash
 python debug_invalid_http.py

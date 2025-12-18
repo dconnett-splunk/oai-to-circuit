@@ -98,10 +98,12 @@ flowchart LR
   - Endpoints: `/health`, `/v1/chat/completions`
   - Request rewrite/proxy to Circuit with quota enforcement
   - Subkey extraction from headers
+  - Splunk HEC integration for usage metrics
 - `oauth.py`: OAuth2 client credentials flow with in-memory token caching.
 - `quota.py`: QuotaManager for per-subkey, per-model usage tracking (SQLite) and quota loading from env/JSON.
 - `config.py`: Configuration dataclass and environment variable loading.
 - `logging_config.py`: Unified logging configuration with colorized output and logger renaming filters.
+- `splunk_hec.py`: Splunk HTTP Event Collector client for streaming usage and error events to Splunk.
 
 ### Entry Points
 
@@ -123,8 +125,14 @@ flowchart LR
 - `test_oauth.py`: Token caching, expiry, and missing credential handling.
 - `test_logging_config.py`: Logger renaming filter behavior.
 - `test_https.py`: Server SSL configuration validation.
+- `test_splunk_hec.py`: Splunk HEC integration, event formatting, and error handling.
 
 Run tests with: `pytest`
+
+### Deployment
+
+- `oai-to-circuit.service`: Systemd unit file for production deployment
+- `INSTALLATION.md`: Complete installation guide for systemd-based Linux systems
 
 
 ## Endpoint behavior
@@ -157,6 +165,88 @@ Run tests with: `pytest`
 - Cache policy: If current time is within 60 seconds of expiry, a new token is fetched; otherwise the cached token is reused.
 - Storage: In-memory (per-process). In dual-mode, each process maintains its own cache (potential duplicate fetches are acceptable).
 
+
+## Splunk HEC Integration (Optional)
+
+The bridge can stream usage metrics to Splunk HTTP Event Collector for real-time analytics and monitoring.
+
+### Configuration
+
+Set these environment variables to enable Splunk HEC:
+- `SPLUNK_HEC_URL`: Full URL to Splunk HEC endpoint (e.g., `https://splunk.example.com:8088/services/collector/event`)
+- `SPLUNK_HEC_TOKEN`: HEC authentication token
+- `SPLUNK_SOURCE` (optional, default: `oai-to-circuit`): Event source name
+- `SPLUNK_SOURCETYPE` (optional, default: `llm:usage`): Event sourcetype
+- `SPLUNK_INDEX` (optional, default: `main`): Target Splunk index
+
+### Event Types
+
+**Usage Events** (sent after each API request):
+```json
+{
+  "time": 1703001234.567,
+  "event": {
+    "subkey": "team_member_alice",
+    "model": "gpt-4o-mini",
+    "requests": 1,
+    "prompt_tokens": 150,
+    "completion_tokens": 200,
+    "total_tokens": 350,
+    "status_code": 200,
+    "success": true,
+    "timestamp": "2024-12-18T10:30:45.123456Z"
+  },
+  "source": "oai-to-circuit",
+  "sourcetype": "llm:usage",
+  "index": "main"
+}
+```
+
+**Error Events** (sent when quotas exceeded or other errors):
+```json
+{
+  "time": 1703001234.567,
+  "event": {
+    "event_type": "error",
+    "error_type": "quota_exceeded",
+    "error_message": "Request quota exceeded for model gpt-4o",
+    "subkey": "team_member_alice",
+    "model": "gpt-4o",
+    "timestamp": "2024-12-18T10:30:45.123456Z"
+  },
+  "source": "oai-to-circuit",
+  "sourcetype": "llm:usage:error",
+  "index": "main"
+}
+```
+
+### Behavior
+
+- **Non-blocking**: HEC requests are made with a 5-second timeout and failures do not affect API responses
+- **Automatic**: Events are sent automatically when configured; no additional action required
+- **Optional**: If `SPLUNK_HEC_URL` or `SPLUNK_HEC_TOKEN` are not set, HEC is disabled
+
+### Splunk Queries
+
+**Total usage by user and model:**
+```spl
+index=main sourcetype=llm:usage
+| stats sum(requests) as total_requests, sum(total_tokens) as total_tokens by subkey, model
+| sort -total_tokens
+```
+
+**Quota exceeded events:**
+```spl
+index=main sourcetype=llm:usage:error error_type=quota_exceeded
+| stats count by subkey, model
+| sort -count
+```
+
+**Token usage over time:**
+```spl
+index=main sourcetype=llm:usage
+| timechart span=1h sum(total_tokens) by model
+```
 
 ## Configuration and secrets
 
@@ -336,16 +426,19 @@ The `/health` endpoint returns JSON including `credentials_configured` and `appk
 ## File map (key sources)
 
 - `oai_to_circuit/server.py`: Server startup and CLI handling.
-- `oai_to_circuit/app.py`: FastAPI app factory, endpoints, request proxying.
+- `oai_to_circuit/app.py`: FastAPI app factory, endpoints, request proxying, Splunk HEC integration.
 - `oai_to_circuit/oauth.py`: OAuth2 token acquisition and caching.
 - `oai_to_circuit/quota.py`: Per-subkey quota enforcement and usage tracking.
 - `oai_to_circuit/config.py`: Configuration management.
 - `oai_to_circuit/logging_config.py`: Logging configuration.
+- `oai_to_circuit/splunk_hec.py`: Splunk HTTP Event Collector client.
 - `rewriter.py`: Main entry point (thin wrapper).
 - `generate_cert.py`: RSA 2048 + SHA-256 self-signed certificate generator for development.
 - `examples.py`, `python_openai_demo.py`: Usage examples (curl, OpenAI SDK).
 - `tests/`: Comprehensive unit test suite (run with `pytest`).
 - `debug_invalid_http.py`: Diagnostics for "Invalid HTTP request received" scenarios.
+- `oai-to-circuit.service`: Systemd unit file for production deployment.
+- `INSTALLATION.md`: Complete installation and deployment guide.
 
 
 ## Frequently used URLs

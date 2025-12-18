@@ -49,6 +49,11 @@ def _make_test_config(*, quota_db_path: str, require_subkey: bool, circuit_appke
         api_version="2025-04-01-preview",
         quota_db_path=quota_db_path,
         require_subkey=require_subkey,
+        splunk_hec_url="",
+        splunk_hec_token="",
+        splunk_source="oai-to-circuit",
+        splunk_sourcetype="llm:usage",
+        splunk_index="main",
     )
 
 def test_health_check_flags(tmp_path: Path):

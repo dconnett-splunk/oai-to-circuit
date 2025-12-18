@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request, Response, HTTPException
 from oai_to_circuit.config import BridgeConfig
 from oai_to_circuit.oauth import TokenCache, get_access_token
 from oai_to_circuit.quota import QuotaManager, load_quotas_from_env_or_file
+from oai_to_circuit.splunk_hec import SplunkHEC
 
 
 def extract_subkey(request: Request) -> Optional[str]:
@@ -26,10 +27,11 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
     logger = logging.getLogger("oai_to_circuit")
     token_cache = TokenCache()
     quota_manager: Optional[QuotaManager] = None
+    splunk_hec: Optional[SplunkHEC] = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal quota_manager
+        nonlocal quota_manager, splunk_hec
         logger.info("Starting OpenAI to Circuit Bridge server")
         logger.info(f"Circuit base URL: {config.circuit_base}")
         logger.info(f"API version: {config.api_version}")
@@ -40,6 +42,15 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
         quota_manager = QuotaManager(db_path=config.quota_db_path, quotas=quotas_cfg)
         logger.info(
             f"Quotas enabled: {bool(quotas_cfg)} (db={config.quota_db_path}, require_subkey={config.require_subkey})"
+        )
+
+        # Initialize Splunk HEC
+        splunk_hec = SplunkHEC(
+            hec_url=config.splunk_hec_url,
+            hec_token=config.splunk_hec_token,
+            source=config.splunk_source,
+            sourcetype=config.splunk_sourcetype,
+            index=config.splunk_index,
         )
 
         if not config.circuit_client_id:
@@ -92,6 +103,16 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
         if caller_subkey and quota_manager:
             if not quota_manager.is_request_allowed(caller_subkey, model):
                 logger.warning(f"Quota exceeded (requests) for subkey={caller_subkey} model={model}")
+                
+                # Send quota exceeded event to Splunk
+                if splunk_hec:
+                    splunk_hec.send_error_event(
+                        error_type="quota_exceeded",
+                        error_message=f"Request quota exceeded for model {model}",
+                        subkey=caller_subkey,
+                        model=model,
+                    )
+                
                 raise HTTPException(status_code=429, detail="Quota exceeded for this subkey and model (requests)")
 
         # Insert appkey if not present
@@ -162,6 +183,21 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                     completion_tokens=completion_tokens,
                     total_tokens=total_tokens,
                 )
+                
+                # Send usage event to Splunk HEC
+                if splunk_hec:
+                    splunk_hec.send_usage_event(
+                        subkey=caller_subkey,
+                        model=model,
+                        requests=1,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=total_tokens,
+                        additional_fields={
+                            "status_code": r.status_code,
+                            "success": r.status_code < 400,
+                        },
+                    )
 
             logger.info(f"Circuit API response: {r.status_code}")
             if r.status_code >= 400:
