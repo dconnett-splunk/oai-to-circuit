@@ -1,0 +1,32 @@
+{
+  "team_member_alice": {
+    "claude-3-opus": {"requests": 0},
+    "claude-opus-4": {"requests": 0},
+    "claude-3.5-sonnet": {"requests": 0},
+    "gpt-4o": {"requests": 10, "total_tokens": 50000},
+    "gpt-4o-mini": {"requests": 1000, "total_tokens": 1000000},
+    "*": {"requests": 100, "total_tokens": 500000}
+  },
+  "team_member_bob": {
+    "claude-3-opus": {"requests": 0},
+    "claude-opus-4": {"requests": 0},
+    "claude-3.5-sonnet": {"requests": 0},
+    "gpt-4o-mini": {"requests": 500, "total_tokens": 500000},
+    "*": {"requests": 50}
+  },
+  "power_user_charlie": {
+    "gpt-4o": {"requests": 100, "total_tokens": 500000},
+    "gpt-4o-mini": {"requests": 5000, "total_tokens": 5000000},
+    "claude-3.5-sonnet": {"requests": 50, "total_tokens": 200000},
+    "*": {"requests": 1000}
+  },
+  "restricted_user_dave": {
+    "claude-3-opus": {"requests": 0},
+    "claude-opus-4": {"requests": 0},
+    "claude-3.5-sonnet": {"requests": 0},
+    "gpt-4o": {"requests": 0},
+    "gpt-4o-mini": {"requests": 100, "total_tokens": 100000},
+    "*": {"requests": 0}
+  }
+}
+

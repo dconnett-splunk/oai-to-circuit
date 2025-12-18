@@ -1,0 +1,63 @@
+[Unit]
+Description=OpenAI to Circuit Bridge Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=oai-bridge
+Group=oai-bridge
+WorkingDirectory=/opt/oai-to-circuit
+ExecStart=/usr/bin/python3 /opt/oai-to-circuit/rewriter.py
+
+# Environment variables (override with EnvironmentFile)
+# Circuit API credentials
+Environment="CIRCUIT_CLIENT_ID="
+Environment="CIRCUIT_CLIENT_SECRET="
+Environment="CIRCUIT_APPKEY="
+
+# Server configuration
+Environment="CIRCUIT_BASE=https://chat-ai.cisco.com"
+Environment="TOKEN_URL=https://id.cisco.com/oauth2/default/v1/token"
+Environment="API_VERSION=2025-04-01-preview"
+
+# Quota configuration
+Environment="REQUIRE_SUBKEY=true"
+Environment="QUOTA_DB_PATH=/var/lib/oai-to-circuit/quota.db"
+Environment="QUOTAS_JSON_PATH=/etc/oai-to-circuit/quotas.json"
+
+# Splunk HEC configuration (optional)
+Environment="SPLUNK_HEC_URL="
+Environment="SPLUNK_HEC_TOKEN="
+Environment="SPLUNK_SOURCE=oai-to-circuit"
+Environment="SPLUNK_SOURCETYPE=llm:usage"
+Environment="SPLUNK_INDEX=main"
+
+# Load secrets from separate file (recommended)
+EnvironmentFile=-/etc/oai-to-circuit/credentials.env
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/oai-to-circuit /var/log/oai-to-circuit
+
+# Capabilities
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=oai-to-circuit
+
+[Install]
+WantedBy=multi-user.target
+
