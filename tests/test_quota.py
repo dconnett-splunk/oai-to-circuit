@@ -29,8 +29,9 @@ def test_model_blacklisting():
     """Test that setting requests to 0 blocks access to expensive models."""
     quotas = {
         "team_member": {
-            "gpt-4": {"requests": 0},  # Blacklisted - too expensive
-            "o1-preview": {"requests": 0},  # Blacklisted - too expensive
+            "claude-3-opus": {"requests": 0},  # Blacklisted - too expensive
+            "claude-opus-4": {"requests": 0},  # Blacklisted - too expensive
+            "claude-3.5-sonnet": {"requests": 0},  # Blacklisted - too expensive
             "gpt-4o-mini": {"requests": 100},  # Allowed
             "*": {"requests": 50},  # Default for other models
         }
@@ -40,8 +41,9 @@ def test_model_blacklisting():
         qm = QuotaManager(db_path=tf.name, quotas=quotas)
 
         # Blacklisted models are blocked immediately
-        assert qm.is_request_allowed("team_member", "gpt-4") is False
-        assert qm.is_request_allowed("team_member", "o1-preview") is False
+        assert qm.is_request_allowed("team_member", "claude-3-opus") is False
+        assert qm.is_request_allowed("team_member", "claude-opus-4") is False
+        assert qm.is_request_allowed("team_member", "claude-3.5-sonnet") is False
 
         # Allowed models work fine
         assert qm.is_request_allowed("team_member", "gpt-4o-mini") is True

@@ -58,8 +58,9 @@ Example `quotas.json` (with model blacklisting):
 ```json
 {
   "team-alpha": {
-    "gpt-4": { "requests": 0 },          // Blacklisted - too expensive
-    "o1-preview": { "requests": 0 },     // Blacklisted - too expensive
+    "claude-3-opus": { "requests": 0 },      // Blacklisted - too expensive
+    "claude-opus-4": { "requests": 0 },      // Blacklisted - too expensive
+    "claude-3.5-sonnet": { "requests": 0 },  // Blacklisted - too expensive
     "gpt-4o-mini": { "requests": 1000, "total_tokens": 500000 },
     "*": { "requests": 100 }
   },
@@ -128,10 +129,11 @@ python python_openai_demo.py --stream --prompt "Count to 5"
   ```json
   {
     "team_member": {
-      "gpt-4": {"requests": 0},        // Completely blocked
-      "o1-preview": {"requests": 0},   // Completely blocked
-      "gpt-4o-mini": {"requests": 1000},  // Allowed
-      "*": {"requests": 100}           // Default for other models
+      "claude-3-opus": {"requests": 0},      // Completely blocked
+      "claude-opus-4": {"requests": 0},      // Completely blocked
+      "claude-3.5-sonnet": {"requests": 0},  // Completely blocked
+      "gpt-4o-mini": {"requests": 1000},     // Allowed
+      "*": {"requests": 100}                 // Default for other models
     }
   }
   ```

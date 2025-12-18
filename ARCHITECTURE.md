@@ -191,8 +191,8 @@ Quotas are defined in JSON format: `subkey` → `model` → `limits`
 ```json
 {
   "team_member_alice": {
-    "gpt-4": {"requests": 0},           // Blacklisted - too expensive
-    "o1-preview": {"requests": 0},      // Blacklisted - too expensive
+    "claude-3-opus": {"requests": 0},   // Blacklisted - too expensive
+    "claude-opus-4": {"requests": 0},   // Blacklisted - too expensive
     "gpt-4o": {"requests": 10},         // Limited use for expensive model
     "gpt-4o-mini": {"requests": 1000},  // High quota for cheap model
     "*": {"requests": 100}              // Default for any other model
@@ -214,9 +214,10 @@ To blacklist a model (prevent all access), set `requests: 0`:
 ```json
 {
   "subkey1": {
-    "gpt-4": {"requests": 0},        // Completely blocked
-    "o1-preview": {"requests": 0},   // Completely blocked
-    "*": {"requests": 100}           // Other models allowed
+    "claude-3-opus": {"requests": 0},      // Completely blocked
+    "claude-opus-4": {"requests": 0},      // Completely blocked
+    "claude-3.5-sonnet": {"requests": 0},  // Completely blocked
+    "*": {"requests": 100}                 // Other models allowed
   }
 }
 ```
@@ -321,9 +322,15 @@ The `/health` endpoint returns JSON including `credentials_configured` and `appk
 
 - **Streaming**: Implement true SSE/chunked passthrough when `stream=true` instead of returning a buffered body.
 - **Quota semantics**: Add time windows (daily/monthly), shared backing store (Redis/Postgres), and optional preflight token limits.
-- **Authn/z**: Consider separating “subkey identity” from client `Authorization` to avoid confusion with upstream auth conventions.
+- **Authn/z**: Consider separating "subkey identity" from client `Authorization` to avoid confusion with upstream auth conventions.
 - **Observability**: Add request IDs and structured JSON logs; consider metrics for quota usage and upstream latency.
 - **Config**: Validate required env vars on startup; support `.env` loading explicitly (currently dependency exists but not wired).
+- **API Structure Rewriting**: Extend the bridge to support rewriting between other API formats beyond OpenAI↔Circuit:
+  - Support for translating between different LLM provider APIs (Anthropic, Cohere, etc.)
+  - Configurable transformation rules for request/response formats
+  - Plugin architecture for custom API adapters
+  - Multi-backend routing based on model name or other criteria
+  - Unified request format that can target multiple backends
 
 
 ## File map (key sources)
