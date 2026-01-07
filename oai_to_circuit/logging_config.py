@@ -1,4 +1,5 @@
 import logging
+import os
 from logging.config import dictConfig
 
 
@@ -19,54 +20,65 @@ class RenameLoggerFilter(logging.Filter):
         return True
 
 
-LOGGING_CONFIG = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "formatters": {
-        "default": {
-            "()": "uvicorn.logging.DefaultFormatter",
-            "fmt": "%(levelprefix)s %(asctime)s - %(processName)-13s[%(process)5d] - %(name)-8s - %(message)s",
-            "use_colors": True,
+def get_logging_config():
+    """Generate logging configuration with configurable log level."""
+    # Allow LOG_LEVEL environment variable to control app logging
+    # Valid values: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+    
+    # Validate log level
+    valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+    if log_level not in valid_levels:
+        log_level = "INFO"
+    
+    return {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "default": {
+                "()": "uvicorn.logging.DefaultFormatter",
+                "fmt": "%(levelprefix)s %(asctime)s - %(processName)-13s[%(process)5d] - %(name)-8s - %(message)s",
+                "use_colors": True,
+            },
+            "access": {
+                "()": "uvicorn.logging.AccessFormatter",
+                "fmt": "%(levelprefix)s %(asctime)s - %(processName)-13s[%(process)5d] - %(name)-10s - %(client_addr)s - \"%(request_line)s\" %(status_code)s",
+                "use_colors": True,
+            },
         },
-        "access": {
-            "()": "uvicorn.logging.AccessFormatter",
-            "fmt": "%(levelprefix)s %(asctime)s - %(processName)-13s[%(process)5d] - %(name)-10s - %(client_addr)s - \"%(request_line)s\" %(status_code)s",
-            "use_colors": True,
+        "handlers": {
+            "default": {
+                "class": "logging.StreamHandler",
+                "formatter": "default",
+                "stream": "ext://sys.stderr",
+                "filters": ["rename_uvicorn"],
+            },
+            "access": {
+                "class": "logging.StreamHandler",
+                "formatter": "access",
+                "stream": "ext://sys.stdout",
+            },
         },
-    },
-    "handlers": {
-        "default": {
-            "class": "logging.StreamHandler",
-            "formatter": "default",
-            "stream": "ext://sys.stderr",
-            "filters": ["rename_uvicorn"],
+        "filters": {
+            "rename_uvicorn": {
+                "()": "oai_to_circuit.logging_config.RenameLoggerFilter",
+                "from_name": "uvicorn.error",
+                "to_name": "uvicorn",
+            }
         },
-        "access": {
-            "class": "logging.StreamHandler",
-            "formatter": "access",
-            "stream": "ext://sys.stdout",
+        "loggers": {
+            "uvicorn": {"handlers": ["default"], "level": "INFO", "propagate": False},
+            "uvicorn.error": {"handlers": ["default"], "level": "INFO", "propagate": False},
+            "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": False},
+            "asyncio": {"handlers": ["default"], "level": "INFO", "propagate": False},
+            "oai_to_circuit": {"handlers": ["default"], "level": log_level, "propagate": False},
         },
-    },
-    "filters": {
-        "rename_uvicorn": {
-            "()": "oai_to_circuit.logging_config.RenameLoggerFilter",
-            "from_name": "uvicorn.error",
-            "to_name": "uvicorn",
-        }
-    },
-    "loggers": {
-        "uvicorn": {"handlers": ["default"], "level": "INFO", "propagate": False},
-        "uvicorn.error": {"handlers": ["default"], "level": "INFO", "propagate": False},
-        "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": False},
-        "asyncio": {"handlers": ["default"], "level": "INFO", "propagate": False},
-        "oai_to_circuit": {"handlers": ["default"], "level": "DEBUG", "propagate": False},
-    },
-    "root": {"handlers": ["default"], "level": "INFO"},
-}
+        "root": {"handlers": ["default"], "level": "INFO"},
+    }
 
 
 def configure_logging() -> None:
     """Configure unified logging for the app + uvicorn."""
-    dictConfig(LOGGING_CONFIG)
+    dictConfig(get_logging_config())
 
 

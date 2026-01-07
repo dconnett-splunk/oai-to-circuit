@@ -31,7 +31,11 @@ Environment="SPLUNK_HEC_URL="
 Environment="SPLUNK_HEC_TOKEN="
 Environment="SPLUNK_SOURCE=oai-to-circuit"
 Environment="SPLUNK_SOURCETYPE=llm:usage"
-Environment="SPLUNK_INDEX=main"
+Environment="SPLUNK_INDEX=oai_circuit"
+Environment="SPLUNK_VERIFY_SSL=true"
+
+# Logging configuration
+Environment="LOG_LEVEL=INFO"
 
 # Load secrets from separate file (recommended)
 EnvironmentFile=-/etc/oai-to-circuit/credentials.env
