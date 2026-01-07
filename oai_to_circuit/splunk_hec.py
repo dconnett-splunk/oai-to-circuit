@@ -1,6 +1,7 @@
 import json
 import logging
 import time
+import hashlib
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 
@@ -22,6 +23,7 @@ class SplunkHEC:
         sourcetype: str = "llm:usage",
         index: str = "main",
         timeout: float = 5.0,
+        hash_subkeys: bool = True,
     ):
         self.hec_url = hec_url
         self.hec_token = hec_token
@@ -29,13 +31,36 @@ class SplunkHEC:
         self.sourcetype = sourcetype
         self.index = index
         self.timeout = timeout
+        self.hash_subkeys = hash_subkeys
         self.enabled = bool(hec_url and hec_token)
         self.logger = logging.getLogger("oai_to_circuit.splunk_hec")
 
         if self.enabled:
-            self.logger.info(f"Splunk HEC enabled: {self.hec_url}")
+            self.logger.info(
+                f"Splunk HEC enabled: {self.hec_url} "
+                f"(subkey hashing: {'enabled' if hash_subkeys else 'disabled'})"
+            )
         else:
             self.logger.info("Splunk HEC disabled (no URL or token configured)")
+
+    def _hash_subkey(self, subkey: str) -> str:
+        """
+        Hash a subkey for privacy while maintaining consistent identification.
+        Uses SHA-256 and returns first 16 chars for readability.
+        
+        Args:
+            subkey: The subkey to hash
+            
+        Returns:
+            Hashed subkey (or original if hashing is disabled)
+        """
+        if not self.hash_subkeys:
+            return subkey
+        
+        # Use SHA-256 for consistent, secure hashing
+        hash_obj = hashlib.sha256(subkey.encode('utf-8'))
+        # Return first 16 chars of hex digest for readability
+        return f"sha256:{hash_obj.hexdigest()[:16]}"
 
     def send_usage_event(
         self,
@@ -66,10 +91,13 @@ class SplunkHEC:
             self.logger.debug("Splunk HEC is disabled, skipping usage event")
             return False
 
+        # Hash subkey for privacy in exports
+        hashed_subkey = self._hash_subkey(subkey)
+        
         timestamp_iso = datetime.now(timezone.utc).isoformat()
         
         event_data = {
-            "subkey": subkey,
+            "subkey": hashed_subkey,
             "model": model,
             "requests": requests,
             "prompt_tokens": prompt_tokens,
@@ -90,16 +118,20 @@ class SplunkHEC:
         }
 
         try:
-            self.logger.debug(
-                f"Forwarding usage event to Splunk HEC at {self.hec_url}: "
-                f"subkey={subkey}, model={model}, total_tokens={total_tokens}"
+            self.logger.info(
+                f"[HEC EXPORT] Starting Splunk HEC export - "
+                f"subkey={hashed_subkey}, model={model}, "
+                f"tokens={total_tokens} (prompt={prompt_tokens}, completion={completion_tokens}), "
+                f"url={self.hec_url}"
             )
-            self.logger.debug(f"Full HEC payload: {json.dumps(hec_event, indent=2)}")
+            self.logger.debug(f"[HEC EXPORT] Full HEC payload: {json.dumps(hec_event, indent=2)}")
             
             headers = {
-                "Authorization": f"Splunk {self.hec_token}",
+                "Authorization": f"Splunk {self.hec_token[:10]}..." if self.hec_token else "None",
                 "Content-Type": "application/json",
             }
+            
+            self.logger.debug(f"[HEC EXPORT] Sending POST to {self.hec_url} with timeout={self.timeout}s")
             
             with httpx.Client(timeout=self.timeout, verify=True) as client:
                 response = client.post(
@@ -109,34 +141,53 @@ class SplunkHEC:
                 )
                 
                 if response.status_code == 200:
-                    self.logger.debug(
-                        f"Splunk HEC event sent successfully for subkey={subkey}, "
-                        f"model={model}. Response: {response.text}"
+                    self.logger.info(
+                        f"[HEC EXPORT] ✓ SUCCESS - Event sent successfully for "
+                        f"subkey={hashed_subkey}, model={model}, tokens={total_tokens}. "
+                        f"Response: {response.text}"
                     )
                     return True
                 else:
                     self.logger.error(
-                        f"Splunk HEC returned status {response.status_code} for subkey={subkey}, "
-                        f"model={model}. URL: {self.hec_url}. Response: {response.text}"
+                        f"[HEC EXPORT] ✗ FAILED - Non-200 status code {response.status_code} for "
+                        f"subkey={hashed_subkey}, model={model}. "
+                        f"URL: {self.hec_url}. "
+                        f"Response body: {response.text}. "
+                        f"Request payload: {json.dumps(hec_event)}"
                     )
                     return False
                     
         except httpx.TimeoutException as e:
             self.logger.error(
-                f"Splunk HEC request timed out after {self.timeout}s for subkey={subkey}, "
-                f"model={model}. URL: {self.hec_url}. Error: {e}"
+                f"[HEC EXPORT] ✗ TIMEOUT - Request timed out after {self.timeout}s for "
+                f"subkey={hashed_subkey}, model={model}, tokens={total_tokens}. "
+                f"URL: {self.hec_url}. "
+                f"Error details: {e}. "
+                f"Payload size: {len(json.dumps(hec_event))} bytes"
+            )
+            return False
+        except httpx.ConnectError as e:
+            self.logger.error(
+                f"[HEC EXPORT] ✗ CONNECTION FAILED - Cannot connect to Splunk HEC for "
+                f"subkey={hashed_subkey}, model={model}. "
+                f"URL: {self.hec_url}. "
+                f"Error: {e}"
             )
             return False
         except httpx.HTTPError as e:
             self.logger.error(
-                f"HTTP error sending event to Splunk HEC for subkey={subkey}, "
-                f"model={model}. URL: {self.hec_url}. Error: {e}"
+                f"[HEC EXPORT] ✗ HTTP ERROR - HTTP error sending event for "
+                f"subkey={hashed_subkey}, model={model}. "
+                f"URL: {self.hec_url}. "
+                f"Error: {type(e).__name__}: {e}"
             )
             return False
         except Exception as e:
             self.logger.error(
-                f"Unexpected error sending event to Splunk HEC for subkey={subkey}, "
-                f"model={model}. URL: {self.hec_url}. Error: {type(e).__name__}: {e}",
+                f"[HEC EXPORT] ✗ UNEXPECTED ERROR - Failed to send event for "
+                f"subkey={hashed_subkey}, model={model}. "
+                f"URL: {self.hec_url}. "
+                f"Error: {type(e).__name__}: {e}",
                 exc_info=True
             )
             return False
@@ -166,6 +217,9 @@ class SplunkHEC:
             self.logger.debug("Splunk HEC is disabled, skipping error event")
             return False
 
+        # Hash subkey for privacy in exports
+        hashed_subkey = self._hash_subkey(subkey) if subkey else None
+        
         timestamp_iso = datetime.now(timezone.utc).isoformat()
         
         event_data = {
@@ -175,8 +229,8 @@ class SplunkHEC:
             "timestamp": timestamp_iso,
         }
         
-        if subkey:
-            event_data["subkey"] = subkey
+        if hashed_subkey:
+            event_data["subkey"] = hashed_subkey
         if model:
             event_data["model"] = model
         if additional_fields:
@@ -191,14 +245,15 @@ class SplunkHEC:
         }
 
         try:
-            self.logger.debug(
-                f"Forwarding error event to Splunk HEC at {self.hec_url}: "
-                f"error_type={error_type}, subkey={subkey}, model={model}"
+            self.logger.info(
+                f"[HEC ERROR EXPORT] Starting Splunk HEC error export - "
+                f"error_type={error_type}, subkey={hashed_subkey}, model={model}, "
+                f"url={self.hec_url}"
             )
-            self.logger.debug(f"Full HEC error payload: {json.dumps(hec_event, indent=2)}")
+            self.logger.debug(f"[HEC ERROR EXPORT] Full HEC error payload: {json.dumps(hec_event, indent=2)}")
             
             headers = {
-                "Authorization": f"Splunk {self.hec_token}",
+                "Authorization": f"Splunk {self.hec_token[:10]}..." if self.hec_token else "None",
                 "Content-Type": "application/json",
             }
             
@@ -210,36 +265,47 @@ class SplunkHEC:
                 )
                 
                 if response.status_code == 200:
-                    self.logger.debug(
-                        f"Splunk HEC error event sent successfully: "
-                        f"error_type={error_type}, subkey={subkey}. Response: {response.text}"
+                    self.logger.info(
+                        f"[HEC ERROR EXPORT] ✓ SUCCESS - Error event sent successfully: "
+                        f"error_type={error_type}, subkey={hashed_subkey}. "
+                        f"Response: {response.text}"
                     )
                     return True
                 else:
                     self.logger.error(
-                        f"Splunk HEC error event failed with status {response.status_code}: "
-                        f"error_type={error_type}, subkey={subkey}, model={model}. "
-                        f"URL: {self.hec_url}. Response: {response.text}"
+                        f"[HEC ERROR EXPORT] ✗ FAILED - Status {response.status_code}: "
+                        f"error_type={error_type}, subkey={hashed_subkey}, model={model}. "
+                        f"URL: {self.hec_url}. "
+                        f"Response: {response.text}"
                     )
                     return False
                     
         except httpx.TimeoutException as e:
             self.logger.error(
-                f"Splunk HEC error event timed out after {self.timeout}s: "
-                f"error_type={error_type}, subkey={subkey}. URL: {self.hec_url}. Error: {e}"
+                f"[HEC ERROR EXPORT] ✗ TIMEOUT - Request timed out after {self.timeout}s: "
+                f"error_type={error_type}, subkey={hashed_subkey}. "
+                f"URL: {self.hec_url}. Error: {e}"
+            )
+            return False
+        except httpx.ConnectError as e:
+            self.logger.error(
+                f"[HEC ERROR EXPORT] ✗ CONNECTION FAILED - Cannot connect to Splunk HEC: "
+                f"error_type={error_type}, subkey={hashed_subkey}. "
+                f"URL: {self.hec_url}. Error: {e}"
             )
             return False
         except httpx.HTTPError as e:
             self.logger.error(
-                f"HTTP error sending error event to Splunk HEC: "
-                f"error_type={error_type}, subkey={subkey}. URL: {self.hec_url}. Error: {e}"
+                f"[HEC ERROR EXPORT] ✗ HTTP ERROR - Failed sending error event: "
+                f"error_type={error_type}, subkey={hashed_subkey}. "
+                f"URL: {self.hec_url}. Error: {type(e).__name__}: {e}"
             )
             return False
         except Exception as e:
             self.logger.error(
-                f"Unexpected error sending error event to Splunk HEC: "
-                f"error_type={error_type}, subkey={subkey}. URL: {self.hec_url}. "
-                f"Error: {type(e).__name__}: {e}",
+                f"[HEC ERROR EXPORT] ✗ UNEXPECTED ERROR - Failed to send error event: "
+                f"error_type={error_type}, subkey={hashed_subkey}. "
+                f"URL: {self.hec_url}. Error: {type(e).__name__}: {e}",
                 exc_info=True
             )
             return False
