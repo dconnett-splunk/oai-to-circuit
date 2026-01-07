@@ -51,6 +51,7 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
             source=config.splunk_source,
             sourcetype=config.splunk_sourcetype,
             index=config.splunk_index,
+            verify_ssl=config.splunk_verify_ssl,
         )
 
         if not config.circuit_client_id:

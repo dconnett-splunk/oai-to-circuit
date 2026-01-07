@@ -21,9 +21,10 @@ class SplunkHEC:
         hec_token: Optional[str] = None,
         source: str = "oai-to-circuit",
         sourcetype: str = "llm:usage",
-        index: str = "main",
+        index: str = "oai_circuit",
         timeout: float = 5.0,
         hash_subkeys: bool = True,
+        verify_ssl: bool = True,
     ):
         self.hec_url = hec_url
         self.hec_token = hec_token
@@ -32,13 +33,16 @@ class SplunkHEC:
         self.index = index
         self.timeout = timeout
         self.hash_subkeys = hash_subkeys
+        self.verify_ssl = verify_ssl
         self.enabled = bool(hec_url and hec_token)
         self.logger = logging.getLogger("oai_to_circuit.splunk_hec")
 
         if self.enabled:
+            ssl_status = "enabled" if verify_ssl else "DISABLED (insecure)"
             self.logger.info(
                 f"Splunk HEC enabled: {self.hec_url} "
-                f"(subkey hashing: {'enabled' if hash_subkeys else 'disabled'})"
+                f"(subkey hashing: {'enabled' if hash_subkeys else 'disabled'}, "
+                f"SSL verification: {ssl_status})"
             )
         else:
             self.logger.info("Splunk HEC disabled (no URL or token configured)")
@@ -131,9 +135,12 @@ class SplunkHEC:
                 "Content-Type": "application/json",
             }
             
-            self.logger.debug(f"[HEC EXPORT] Sending POST to {self.hec_url} with timeout={self.timeout}s")
+            self.logger.debug(
+                f"[HEC EXPORT] Sending POST to {self.hec_url} with timeout={self.timeout}s, "
+                f"verify_ssl={self.verify_ssl}"
+            )
             
-            with httpx.Client(timeout=self.timeout, verify=True) as client:
+            with httpx.Client(timeout=self.timeout, verify=self.verify_ssl) as client:
                 response = client.post(
                     self.hec_url,
                     json=hec_event,
@@ -257,7 +264,7 @@ class SplunkHEC:
                 "Content-Type": "application/json",
             }
             
-            with httpx.Client(timeout=self.timeout, verify=True) as client:
+            with httpx.Client(timeout=self.timeout, verify=self.verify_ssl) as client:
                 response = client.post(
                     self.hec_url,
                     json=hec_event,

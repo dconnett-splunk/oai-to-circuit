@@ -20,6 +20,7 @@ class BridgeConfig:
     splunk_source: str
     splunk_sourcetype: str
     splunk_index: str
+    splunk_verify_ssl: bool
 
 
 def load_config() -> BridgeConfig:
@@ -37,6 +38,7 @@ def load_config() -> BridgeConfig:
         splunk_source=os.environ.get("SPLUNK_SOURCE", "oai-to-circuit"),
         splunk_sourcetype=os.environ.get("SPLUNK_SOURCETYPE", "llm:usage"),
         splunk_index=os.environ.get("SPLUNK_INDEX", "main"),
+        splunk_verify_ssl=os.environ.get("SPLUNK_VERIFY_SSL", "true").lower() in ("1", "true", "yes"),
     )
 
 
