@@ -13,7 +13,9 @@ A minimal local webserver that translates standard OpenAI-style requests into Ci
 
 ## Quick Start
 
-**Development:** See `QUICKSTART.md` or `QUICKSTART.org` for step-by-step local setup, including cert generation and examples.
+- **Local Development**: See `QUICKSTART.md` or `QUICKSTART.org` for step-by-step setup
+- **Production Installation**: See `INSTALLATION.md` for systemd service setup  
+- **Deploying Updates**: See `DEPLOYMENT.md` for update procedures
 
 **Production:** See `DEPLOYMENT_QUICKSTART.md` for systemd deployment or `INSTALLATION.md` for complete installation guide.
 

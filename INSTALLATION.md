@@ -1,5 +1,7 @@
 # Installation Guide
 
+> **Note**: This guide covers initial installation from scratch. For deploying updates to an existing installation, see [DEPLOYMENT.md](DEPLOYMENT.md).
+
 ## Systemd Service Installation
 
 ### Prerequisites
