@@ -37,7 +37,7 @@ def load_config() -> BridgeConfig:
         splunk_hec_token=os.environ.get("SPLUNK_HEC_TOKEN", ""),
         splunk_source=os.environ.get("SPLUNK_SOURCE", "oai-to-circuit"),
         splunk_sourcetype=os.environ.get("SPLUNK_SOURCETYPE", "llm:usage"),
-        splunk_index=os.environ.get("SPLUNK_INDEX", "main"),
+        splunk_index=os.environ.get("SPLUNK_INDEX", "oai_circuit"),
         splunk_verify_ssl=os.environ.get("SPLUNK_VERIFY_SSL", "true").lower() in ("1", "true", "yes"),
     )
 
