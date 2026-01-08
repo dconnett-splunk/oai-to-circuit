@@ -109,6 +109,29 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                 detail="Subkey required. Provide 'Authorization: Bearer <subkey>' or 'X-Bridge-Subkey' header.",
             )
 
+        # Verify subkey is authorized (exists in quotas config or database)
+        if caller_subkey and quota_manager:
+            if not quota_manager.is_subkey_authorized(caller_subkey):
+                logger.warning(f"Unauthorized subkey attempted access: {caller_subkey[:20]}...")
+                
+                # Send unauthorized access event to Splunk
+                if splunk_hec:
+                    splunk_hec.send_error_event(
+                        error_type="unauthorized_subkey",
+                        error_message="Subkey not found in authorized list",
+                        subkey=caller_subkey,
+                        model=model,
+                        additional_fields={
+                            "client_ip": client_ip,
+                            "x_forwarded_for": x_forwarded_for,
+                        },
+                    )
+                
+                raise HTTPException(
+                    status_code=403,
+                    detail="Unauthorized: Subkey not recognized. Please contact administrator.",
+                )
+
         if caller_subkey and quota_manager:
             if not quota_manager.is_request_allowed(caller_subkey, model):
                 logger.warning(f"Quota exceeded (requests) for subkey={caller_subkey} model={model}")

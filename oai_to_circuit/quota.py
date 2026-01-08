@@ -98,6 +98,29 @@ class QuotaManager:
         _, _, _, total_used = self._get_usage(subkey, model)
         return (total_used + max(0, next_total_tokens)) > int(total_limit)
 
+    def is_subkey_authorized(self, subkey: str) -> bool:
+        """
+        Check if a subkey is authorized (exists in quotas config or database).
+        
+        Args:
+            subkey: The subkey to check
+            
+        Returns:
+            True if the subkey is authorized, False otherwise
+        """
+        # Check if subkey is in quotas configuration
+        if subkey in self.quotas:
+            return True
+        
+        # Check if subkey exists in the database
+        with self._connect() as conn:
+            cur = conn.execute(
+                "SELECT COUNT(*) FROM subkey_names WHERE subkey=?",
+                (subkey,),
+            )
+            count = cur.fetchone()[0]
+            return count > 0
+    
     def get_friendly_name(self, subkey: str) -> Optional[str]:
         """
         Get the friendly name for a subkey.
