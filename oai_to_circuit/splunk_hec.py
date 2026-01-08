@@ -75,6 +75,7 @@ class SplunkHEC:
         completion_tokens: int = 0,
         total_tokens: int = 0,
         additional_fields: Optional[Dict[str, Any]] = None,
+        preserve_timestamp: bool = False,
     ) -> bool:
         """
         Send a usage event to Splunk HEC.
@@ -98,7 +99,11 @@ class SplunkHEC:
         # Hash subkey for privacy in exports
         hashed_subkey = self._hash_subkey(subkey)
         
-        timestamp_iso = datetime.now(timezone.utc).isoformat()
+        # Use existing timestamp from additional_fields if preserve_timestamp is True
+        if preserve_timestamp and additional_fields and 'timestamp' in additional_fields:
+            timestamp_iso = additional_fields['timestamp']
+        else:
+            timestamp_iso = datetime.now(timezone.utc).isoformat()
         
         event_data = {
             "subkey": hashed_subkey,
@@ -111,7 +116,10 @@ class SplunkHEC:
         }
         
         if additional_fields:
-            event_data.update(additional_fields)
+            # Don't duplicate timestamp if we already used it
+            for key, value in additional_fields.items():
+                if key != 'timestamp' or not preserve_timestamp:
+                    event_data[key] = value
 
         hec_event = {
             "time": time.time(),

@@ -177,8 +177,10 @@ def main():
         total_tokens = event_data.get('total_tokens', 0)
         requests = event_data.get('requests', 1)
         
-        # Additional fields
+        # Additional fields (including original timestamp)
         additional_fields = {}
+        if 'timestamp' in event_data:
+            additional_fields['timestamp'] = event_data['timestamp']
         if 'status_code' in event_data:
             additional_fields['status_code'] = event_data['status_code']
         if 'success' in event_data:
@@ -193,7 +195,7 @@ def main():
             print(f"   [DRY RUN] Would send to HEC")
             events_sent += 1
         else:
-            # Send to HEC
+            # Send to HEC (preserve original timestamp)
             success = hec.send_usage_event(
                 subkey=subkey,
                 model=model,
@@ -202,6 +204,7 @@ def main():
                 completion_tokens=completion_tokens,
                 total_tokens=total_tokens,
                 additional_fields=additional_fields,
+                preserve_timestamp=True,  # Use timestamp from log, not current time
             )
             
             if success:
