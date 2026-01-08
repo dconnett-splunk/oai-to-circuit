@@ -141,10 +141,20 @@ class SplunkHEC:
         }
 
         try:
+            # Extract source information for logging
+            source_info = ""
+            if additional_fields:
+                client_ip = additional_fields.get("client_ip")
+                x_forwarded_for = additional_fields.get("x_forwarded_for")
+                if x_forwarded_for:
+                    source_info = f", source={client_ip} (X-Forwarded-For: {x_forwarded_for})"
+                elif client_ip:
+                    source_info = f", source={client_ip}"
+            
             self.logger.info(
                 f"[HEC EXPORT] Starting Splunk HEC export - "
                 f"subkey={hashed_subkey}, model={model}, "
-                f"tokens={total_tokens} (prompt={prompt_tokens}, completion={completion_tokens}), "
+                f"tokens={total_tokens} (prompt={prompt_tokens}, completion={completion_tokens}){source_info}, "
                 f"url={self.hec_url}"
             )
             self.logger.debug(f"[HEC EXPORT] Full HEC payload: {json.dumps(hec_event, indent=2)}")
@@ -170,7 +180,7 @@ class SplunkHEC:
                 if response.status_code == 200:
                     self.logger.info(
                         f"[HEC EXPORT] ✓ SUCCESS - Event sent successfully for "
-                        f"subkey={hashed_subkey}, model={model}, tokens={total_tokens}. "
+                        f"subkey={hashed_subkey}, model={model}, tokens={total_tokens}{source_info}. "
                         f"Response: {response.text}"
                     )
                     return True
@@ -280,9 +290,19 @@ class SplunkHEC:
         }
 
         try:
+            # Extract source information for logging
+            source_info = ""
+            if additional_fields:
+                client_ip = additional_fields.get("client_ip")
+                x_forwarded_for = additional_fields.get("x_forwarded_for")
+                if x_forwarded_for:
+                    source_info = f", source={client_ip} (X-Forwarded-For: {x_forwarded_for})"
+                elif client_ip:
+                    source_info = f", source={client_ip}"
+            
             self.logger.info(
                 f"[HEC ERROR EXPORT] Starting Splunk HEC error export - "
-                f"error_type={error_type}, subkey={hashed_subkey}, model={model}, "
+                f"error_type={error_type}, subkey={hashed_subkey}, model={model}{source_info}, "
                 f"url={self.hec_url}"
             )
             self.logger.debug(f"[HEC ERROR EXPORT] Full HEC error payload: {json.dumps(hec_event, indent=2)}")
@@ -302,7 +322,7 @@ class SplunkHEC:
                 if response.status_code == 200:
                     self.logger.info(
                         f"[HEC ERROR EXPORT] ✓ SUCCESS - Error event sent successfully: "
-                        f"error_type={error_type}, subkey={hashed_subkey}. "
+                        f"error_type={error_type}, subkey={hashed_subkey}{source_info}. "
                         f"Response: {response.text}"
                     )
                     return True

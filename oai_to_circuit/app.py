@@ -78,7 +78,14 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
 
     @app.post("/v1/chat/completions")
     async def chat_completion(request: Request):
-        logger.info(f"Received request from {request.client.host if request.client else 'unknown'}")
+        # Extract client IP and X-Forwarded-For for proper source tracking
+        client_ip = request.client.host if request.client else 'unknown'
+        x_forwarded_for = request.headers.get("X-Forwarded-For", "")
+        
+        if x_forwarded_for:
+            logger.info(f"Received request from {client_ip} (X-Forwarded-For: {x_forwarded_for})")
+        else:
+            logger.info(f"Received request from {client_ip}")
         logger.debug(f"Request headers: {dict(request.headers)}")
 
         try:
@@ -115,6 +122,10 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                         subkey=caller_subkey,
                         model=model,
                         friendly_name=friendly_name,
+                        additional_fields={
+                            "client_ip": client_ip,
+                            "x_forwarded_for": x_forwarded_for,
+                        },
                     )
                 
                 raise HTTPException(status_code=429, detail="Quota exceeded for this subkey and model (requests)")
@@ -201,6 +212,8 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                         additional_fields={
                             "status_code": r.status_code,
                             "success": r.status_code < 400,
+                            "client_ip": client_ip,
+                            "x_forwarded_for": x_forwarded_for,
                         },
                         friendly_name=friendly_name,
                         email=email,
