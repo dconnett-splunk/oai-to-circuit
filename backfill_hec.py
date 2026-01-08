@@ -55,6 +55,7 @@ env_file = load_env_file()
 
 from oai_to_circuit.config import load_config
 from oai_to_circuit.splunk_hec import SplunkHEC
+from oai_to_circuit.quota import QuotaManager
 
 
 def parse_log_line(line: str):
@@ -121,6 +122,9 @@ def main():
         hash_subkeys=True,  # Enable hashing to match production
     )
     
+    # Initialize QuotaManager to look up friendly names
+    quota_manager = QuotaManager(db_path=config.quota_db_path, quotas={})
+    
     print(f"\n{'='*70}")
     print("SPLUNK HEC BACKFILL TOOL")
     print(f"{'='*70}")
@@ -177,6 +181,14 @@ def main():
         total_tokens = event_data.get('total_tokens', 0)
         requests = event_data.get('requests', 1)
         
+        # Look up friendly name for the subkey
+        friendly_name = None
+        if subkey != 'unknown':
+            try:
+                friendly_name = quota_manager.get_friendly_name(subkey)
+            except Exception:
+                pass  # If lookup fails, continue without name
+        
         # Additional fields (including original timestamp)
         additional_fields = {}
         if 'timestamp' in event_data:
@@ -186,9 +198,10 @@ def main():
         if 'success' in event_data:
             additional_fields['success'] = event_data['success']
         
+        name_display = f" ({friendly_name})" if friendly_name else ""
         print(
             f"📝 Event {events_parsed}: {timestamp} - "
-            f"subkey={subkey[:20]}..., model={model}, tokens={total_tokens}"
+            f"subkey={subkey[:20]}...{name_display}, model={model}, tokens={total_tokens}"
         )
         
         if args.dry_run:
@@ -205,6 +218,7 @@ def main():
                 total_tokens=total_tokens,
                 additional_fields=additional_fields,
                 preserve_timestamp=True,  # Use timestamp from log, not current time
+                friendly_name=friendly_name,
             )
             
             if success:

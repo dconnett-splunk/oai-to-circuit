@@ -23,6 +23,7 @@ def add_names_table(db_path: str) -> None:
         CREATE TABLE IF NOT EXISTS subkey_names (
             subkey TEXT PRIMARY KEY,
             friendly_name TEXT NOT NULL,
+            email TEXT,
             description TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -41,24 +42,26 @@ def add_names_table(db_path: str) -> None:
     print(f"✓ Created subkey_names table in {db_path}")
 
 
-def add_name_mapping(db_path: str, subkey: str, friendly_name: str, description: str = "") -> None:
+def add_name_mapping(db_path: str, subkey: str, friendly_name: str, email: str = "", description: str = "") -> None:
     """Add or update a name mapping for a subkey."""
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
     cursor.execute("""
-        INSERT INTO subkey_names (subkey, friendly_name, description)
-        VALUES (?, ?, ?)
+        INSERT INTO subkey_names (subkey, friendly_name, email, description)
+        VALUES (?, ?, ?, ?)
         ON CONFLICT(subkey) DO UPDATE SET
             friendly_name = excluded.friendly_name,
+            email = excluded.email,
             description = excluded.description,
             updated_at = CURRENT_TIMESTAMP
-    """, (subkey, friendly_name, description))
+    """, (subkey, friendly_name, email, description))
     
     conn.commit()
     conn.close()
     
-    print(f"✓ Mapped '{subkey[:20]}...' → '{friendly_name}'")
+    email_display = f" <{email}>" if email else ""
+    print(f"✓ Mapped '{subkey[:20]}...' → '{friendly_name}'{email_display}")
 
 
 def list_mappings(db_path: str) -> None:
@@ -67,7 +70,7 @@ def list_mappings(db_path: str) -> None:
     cursor = conn.cursor()
     
     cursor.execute("""
-        SELECT friendly_name, subkey, description, created_at
+        SELECT friendly_name, email, subkey, description, created_at
         FROM subkey_names
         ORDER BY friendly_name
     """)
@@ -79,13 +82,14 @@ def list_mappings(db_path: str) -> None:
         print("No name mappings found.")
         return
     
-    print(f"\n{'Friendly Name':<30} {'Subkey Prefix':<25} {'Description':<30} {'Created'}")
+    print(f"\n{'Friendly Name':<25} {'Email':<30} {'Subkey Prefix':<25} {'Description':<25}")
     print("=" * 120)
     
-    for name, subkey, desc, created in rows:
+    for name, email, subkey, desc, created in rows:
+        email_display = (email[:27] + "...") if email and len(email) > 30 else (email or "")
         subkey_prefix = subkey[:22] + "..." if len(subkey) > 25 else subkey
-        desc_short = (desc[:27] + "...") if len(desc) > 30 else desc
-        print(f"{name:<30} {subkey_prefix:<25} {desc_short:<30} {created}")
+        desc_short = (desc[:22] + "...") if desc and len(desc) > 25 else (desc or "")
+        print(f"{name:<25} {email_display:<30} {subkey_prefix:<25} {desc_short:<25}")
 
 
 def remove_mapping(db_path: str, subkey: str) -> None:
@@ -117,6 +121,7 @@ Examples:
   python add_subkey_names_table.py --add \\
     --subkey "fie_dave_jhKaCh88CgkSfl_p7RN01jv82dkOL90g" \\
     --name "Dave (FIE Team)" \\
+    --email "dave@example.com" \\
     --description "Field Innovation Engineering"
 
   # List all mappings
@@ -143,6 +148,7 @@ Examples:
     # Arguments for --add
     parser.add_argument("--subkey", help="Subkey to map")
     parser.add_argument("--name", help="Friendly name")
+    parser.add_argument("--email", default="", help="Optional email address")
     parser.add_argument("--description", default="", help="Optional description")
     
     args = parser.parse_args()
@@ -155,7 +161,7 @@ Examples:
             if not args.subkey or not args.name:
                 print("Error: --add requires --subkey and --name", file=sys.stderr)
                 sys.exit(1)
-            add_name_mapping(args.db, args.subkey, args.name, args.description)
+            add_name_mapping(args.db, args.subkey, args.name, args.email, args.description)
         
         elif args.list:
             list_mappings(args.db)

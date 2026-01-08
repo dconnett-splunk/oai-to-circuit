@@ -123,6 +123,7 @@ Complete guide covering:
 CREATE TABLE IF NOT EXISTS subkey_names (
     subkey TEXT PRIMARY KEY,
     friendly_name TEXT NOT NULL,
+    email TEXT,
     description TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -174,6 +175,7 @@ Use the commands provided by the check script, or manually:
 python add_subkey_names_table.py --add \
   --subkey "your_key" \
   --name "Your Name (Team)" \
+  --email "your.email@example.com" \
   --description "Description"
 ```
 

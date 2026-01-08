@@ -34,6 +34,26 @@ class QuotaManager:
                 )
                 """
             )
+            # Create subkey_names table for friendly name mapping
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS subkey_names (
+                    subkey TEXT PRIMARY KEY,
+                    friendly_name TEXT NOT NULL,
+                    email TEXT,
+                    description TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            # Create index on friendly_name for faster lookups
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_friendly_name 
+                ON subkey_names(friendly_name)
+                """
+            )
             conn.commit()
 
     @contextmanager
@@ -77,6 +97,26 @@ class QuotaManager:
             return False
         _, _, _, total_used = self._get_usage(subkey, model)
         return (total_used + max(0, next_total_tokens)) > int(total_limit)
+
+    def get_friendly_name(self, subkey: str) -> Optional[str]:
+        """
+        Get the friendly name for a subkey.
+        
+        Args:
+            subkey: The subkey to look up
+            
+        Returns:
+            The friendly name if found, None otherwise
+        """
+        with self._connect() as conn:
+            cur = conn.execute(
+                "SELECT friendly_name FROM subkey_names WHERE subkey=?",
+                (subkey,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            return row[0]
 
     def record_usage(
         self,

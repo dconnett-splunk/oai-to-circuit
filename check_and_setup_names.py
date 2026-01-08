@@ -50,13 +50,13 @@ def get_active_subkeys(db_path: str) -> List[Tuple[str, int, int]]:
     return rows
 
 
-def get_subkey_name(db_path: str, subkey: str) -> Tuple[str, str]:
-    """Get friendly name and description for a subkey, if it exists."""
+def get_subkey_name(db_path: str, subkey: str) -> Tuple[str, str, str]:
+    """Get friendly name, email, and description for a subkey, if it exists."""
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
     cursor.execute("""
-        SELECT friendly_name, description
+        SELECT friendly_name, email, description
         FROM subkey_names
         WHERE subkey = ?
     """, (subkey,))
@@ -65,8 +65,8 @@ def get_subkey_name(db_path: str, subkey: str) -> Tuple[str, str]:
     conn.close()
     
     if row:
-        return row[0], row[1]
-    return None, None
+        return row[0], row[1], row[2]
+    return None, None, None
 
 
 def main():
@@ -124,31 +124,33 @@ def main():
             return
         
         print(f"Found {len(active_keys)} active subkey(s):\n")
-        print("=" * 120)
-        print(f"{'Status':<8} {'Subkey':<45} {'Name':<25} {'Requests':<12} {'Tokens'}")
-        print("=" * 120)
+        print("=" * 140)
+        print(f"{'Status':<8} {'Subkey':<35} {'Name':<20} {'Email':<30} {'Requests':<12} {'Tokens'}")
+        print("=" * 140)
         
         unnamed_keys = []
         
         for subkey, requests, tokens in active_keys:
             # Get name if exists
             if has_names_table:
-                name, description = get_subkey_name(db_path, subkey)
+                name, email, description = get_subkey_name(db_path, subkey)
             else:
-                name, description = None, None
+                name, email, description = None, None, None
             
             if name:
                 status = "✓ NAMED"
-                name_display = name[:24]
+                name_display = name[:19] if len(name) > 20 else name
+                email_display = (email[:27] + "...") if email and len(email) > 30 else (email or "")
             else:
                 status = "✗ NO NAME"
                 name_display = "(unnamed)"
+                email_display = ""
                 unnamed_keys.append(subkey)
             
             # Truncate subkey for display
-            subkey_display = subkey if len(subkey) <= 44 else subkey[:41] + "..."
+            subkey_display = subkey if len(subkey) <= 34 else subkey[:31] + "..."
             
-            print(f"{status:<8} {subkey_display:<45} {name_display:<25} {requests:<12} {tokens:,}")
+            print(f"{status:<8} {subkey_display:<35} {name_display:<20} {email_display:<30} {requests:<12} {tokens:,}")
         
         print("=" * 120)
         print()
@@ -163,12 +165,13 @@ def main():
                 print(f"  --db {db_path} \\")
                 print(f"  --subkey \"{subkey}\" \\")
                 print(f"  --name \"YOUR_NAME_HERE\" \\")
+                print(f"  --email \"your.email@example.com\" \\")
                 print(f"  --description \"Optional description\"\n")
         else:
             print("✓ All active subkeys have friendly names assigned!")
         
         # Summary
-        print("\n" + "=" * 120)
+        print("\n" + "=" * 140)
         print("SUMMARY:")
         print(f"  Total active keys: {len(active_keys)}")
         if has_names_table:
@@ -176,7 +179,7 @@ def main():
             print(f"  Keys without names: {len(unnamed_keys)}")
         else:
             print(f"  Names table:       NOT CREATED (run --init first)")
-        print("=" * 120)
+        print("=" * 140)
     
     except sqlite3.Error as e:
         print(f"Database error: {e}", file=sys.stderr)

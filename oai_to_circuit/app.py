@@ -107,11 +107,13 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                 
                 # Send quota exceeded event to Splunk
                 if splunk_hec:
+                    friendly_name = quota_manager.get_friendly_name(caller_subkey)
                     splunk_hec.send_error_event(
                         error_type="quota_exceeded",
                         error_message=f"Request quota exceeded for model {model}",
                         subkey=caller_subkey,
                         model=model,
+                        friendly_name=friendly_name,
                     )
                 
                 raise HTTPException(status_code=429, detail="Quota exceeded for this subkey and model (requests)")
@@ -187,6 +189,7 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                 
                 # Send usage event to Splunk HEC
                 if splunk_hec:
+                    friendly_name = quota_manager.get_friendly_name(caller_subkey)
                     splunk_hec.send_usage_event(
                         subkey=caller_subkey,
                         model=model,
@@ -198,6 +201,7 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                             "status_code": r.status_code,
                             "success": r.status_code < 400,
                         },
+                        friendly_name=friendly_name,
                     )
 
             logger.info(f"Circuit API response: {r.status_code}")

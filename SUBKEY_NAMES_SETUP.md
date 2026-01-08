@@ -44,6 +44,7 @@ python add_subkey_names_table.py --add \
   --db /var/lib/oai-to-circuit/quota.db \
   --subkey "your_actual_subkey_here" \
   --name "Friendly Name (Team)" \
+  --email "user@example.com" \
   --description "Optional description"
 ```
 
@@ -55,6 +56,7 @@ python add_subkey_names_table.py --add \
   --db /var/lib/oai-to-circuit/quota.db \
   --subkey "fie_dave_jhKaCh88CgkSfl_p7RN01jv82dkOL90g" \
   --name "Dave (FIE Team)" \
+  --email "dave@example.com" \
   --description "Field Innovation Engineering"
 
 # Example 2: ML Team
@@ -62,6 +64,7 @@ python add_subkey_names_table.py --add \
   --db /var/lib/oai-to-circuit/quota.db \
   --subkey "team_ml_xK9pLm3nQr8sT2vW5yZ1aB4cD7eF0gH6" \
   --name "ML Team" \
+  --email "ml-team@example.com" \
   --description "Machine Learning Research"
 ```
 
@@ -127,6 +130,7 @@ python add_subkey_names_table.py --add \
   --db /var/lib/oai-to-circuit/quota.db \
   --subkey "fie_dave_jhKaCh88CgkSfl_p7RN01jv82dkOL90g" \
   --name "Dave Smith (FIE)" \
+  --email "dave.smith@example.com" \
   --description "Updated description"
 ```
 
@@ -181,6 +185,16 @@ index=oai_circuit sourcetype="llm:usage"
 | eval display_name=coalesce(friendly_name, subkey)
 | stats sum(total_tokens) as total_tokens, sum(requests) as requests by display_name, model
 | sort -total_tokens
+```
+
+See which users need names added:
+
+```spl
+index=oai_circuit sourcetype="llm:usage"
+| eval has_name=if(isnotnull(friendly_name), "Has Name", "Needs Name")
+| stats sum(total_tokens) as tokens, sum(requests) as requests by subkey, has_name
+| where has_name="Needs Name"
+| sort -tokens
 ```
 
 ## Troubleshooting

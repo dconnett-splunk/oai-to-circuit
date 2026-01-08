@@ -15,7 +15,8 @@ python check_and_setup_names.py
 ```bash
 python add_subkey_names_table.py --add \
   --subkey "your_key_here" \
-  --name "Your Name (Team)"
+  --name "Your Name (Team)" \
+  --email "your.email@example.com"
 ```
 
 ### List all names
