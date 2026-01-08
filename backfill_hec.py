@@ -21,6 +21,38 @@ from datetime import datetime
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Load credentials.env if it exists
+def load_env_file():
+    """Load environment variables from credentials.env if it exists."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    env_paths = [
+        os.path.join(script_dir, 'credentials.env'),
+        '/etc/oai-to-circuit/credentials.env',
+    ]
+    
+    for env_path in env_paths:
+        if os.path.exists(env_path):
+            print(f"Loading credentials from: {env_path}")
+            with open(env_path) as f:
+                for line in f:
+                    line = line.strip()
+                    # Skip comments and empty lines
+                    if not line or line.startswith('#'):
+                        continue
+                    # Parse KEY=VALUE
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        key = key.strip()
+                        value = value.strip()
+                        # Don't override existing env vars
+                        if key not in os.environ:
+                            os.environ[key] = value
+            return env_path
+    return None
+
+# Load env before importing config
+env_file = load_env_file()
+
 from oai_to_circuit.config import load_config
 from oai_to_circuit.splunk_hec import SplunkHEC
 
@@ -92,7 +124,14 @@ def main():
     print(f"\n{'='*70}")
     print("SPLUNK HEC BACKFILL TOOL")
     print(f"{'='*70}")
+    
+    if env_file:
+        print(f"Loaded credentials from: {env_file}")
+    else:
+        print("No credentials.env file found, using environment variables")
+    
     print(f"HEC URL: {config.splunk_hec_url}")
+    print(f"HEC Token: {config.splunk_hec_token[:10]}..." if config.splunk_hec_token else "None")
     print(f"Index: {config.splunk_index}")
     print(f"SSL Verification: {config.splunk_verify_ssl}")
     print(f"Dry Run: {args.dry_run}")
