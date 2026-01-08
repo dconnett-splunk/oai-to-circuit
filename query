@@ -1,0 +1,74 @@
+#!/bin/bash
+# Quick query wrapper - makes running common queries easier
+#
+# Usage:
+#   ./query top              # Top users
+#   ./query summary          # Database summary
+#   ./query user fie_dave%   # User details
+#   ./query models           # Model usage
+#   ./query nonames          # Users without names
+
+DB_PATH="${QUOTA_DB_PATH:-/var/lib/oai-to-circuit/quota.db}"
+
+case "$1" in
+    top|users)
+        python3 db_queries.py top-users --db "$DB_PATH" --limit "${2:-10}"
+        ;;
+    
+    summary|stats)
+        python3 db_queries.py summary --db "$DB_PATH"
+        ;;
+    
+    user|detail)
+        if [ -z "$2" ]; then
+            echo "Usage: $0 user <subkey-pattern>"
+            exit 1
+        fi
+        python3 db_queries.py user-detail "$2" --db "$DB_PATH"
+        ;;
+    
+    models|model)
+        python3 db_queries.py model-usage --db "$DB_PATH"
+        ;;
+    
+    nonames|unnamed)
+        python3 db_queries.py users-without-names --db "$DB_PATH"
+        ;;
+    
+    recent)
+        python3 db_queries.py recent-activity --db "$DB_PATH" --limit "${2:-10}"
+        ;;
+    
+    sql)
+        # Raw SQL query
+        shift
+        sqlite3 -header -column "$DB_PATH" "$@"
+        ;;
+    
+    views)
+        # Show available views
+        echo "Available views:"
+        sqlite3 "$DB_PATH" "SELECT name FROM sqlite_master WHERE type='view' ORDER BY name;"
+        ;;
+    
+    *)
+        echo "Usage: $0 {top|summary|user|models|nonames|recent|sql|views} [args...]"
+        echo ""
+        echo "Commands:"
+        echo "  top [N]           Show top N users (default: 10)"
+        echo "  summary           Show database summary"
+        echo "  user PATTERN      Show details for specific user"
+        echo "  models            Show usage by model"
+        echo "  nonames           Show users without friendly names"
+        echo "  recent [N]        Show recent activity"
+        echo "  sql 'QUERY'       Run raw SQL query"
+        echo "  views             List available SQL views"
+        echo ""
+        echo "Examples:"
+        echo "  $0 top 20"
+        echo "  $0 user 'fie_dave%'"
+        echo "  $0 sql 'SELECT * FROM v_top_users LIMIT 5'"
+        exit 1
+        ;;
+esac
+
