@@ -139,13 +139,14 @@ class SplunkHEC:
             self.logger.debug(f"[HEC EXPORT] Full HEC payload: {json.dumps(hec_event, indent=2)}")
             
             headers = {
-                "Authorization": f"Splunk {self.hec_token[:10]}..." if self.hec_token else "None",
+                "Authorization": f"Splunk {self.hec_token}",
                 "Content-Type": "application/json",
             }
             
             self.logger.debug(
                 f"[HEC EXPORT] Sending POST to {self.hec_url} with timeout={self.timeout}s, "
-                f"verify_ssl={self.verify_ssl}"
+                f"verify_ssl={self.verify_ssl}, "
+                f"token={self.hec_token[:10] if self.hec_token else 'None'}..."
             )
             
             with httpx.Client(timeout=self.timeout, verify=self.verify_ssl) as client:
@@ -268,7 +269,7 @@ class SplunkHEC:
             self.logger.debug(f"[HEC ERROR EXPORT] Full HEC error payload: {json.dumps(hec_event, indent=2)}")
             
             headers = {
-                "Authorization": f"Splunk {self.hec_token[:10]}..." if self.hec_token else "None",
+                "Authorization": f"Splunk {self.hec_token}",
                 "Content-Type": "application/json",
             }
             
