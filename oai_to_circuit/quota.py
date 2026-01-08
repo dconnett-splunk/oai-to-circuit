@@ -117,6 +117,26 @@ class QuotaManager:
             if not row:
                 return None
             return row[0]
+    
+    def get_name_and_email(self, subkey: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Get the friendly name and email for a subkey.
+        
+        Args:
+            subkey: The subkey to look up
+            
+        Returns:
+            Tuple of (friendly_name, email) - either can be None if not found
+        """
+        with self._connect() as conn:
+            cur = conn.execute(
+                "SELECT friendly_name, email FROM subkey_names WHERE subkey=?",
+                (subkey,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None, None
+            return row[0], row[1]
 
     def record_usage(
         self,

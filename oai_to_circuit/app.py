@@ -52,6 +52,7 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
             sourcetype=config.splunk_sourcetype,
             index=config.splunk_index,
             verify_ssl=config.splunk_verify_ssl,
+            hash_subkeys=True,  # Always hash subkeys for privacy
         )
 
         if not config.circuit_client_id:
@@ -189,7 +190,7 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                 
                 # Send usage event to Splunk HEC
                 if splunk_hec:
-                    friendly_name = quota_manager.get_friendly_name(caller_subkey)
+                    friendly_name, email = quota_manager.get_name_and_email(caller_subkey)
                     splunk_hec.send_usage_event(
                         subkey=caller_subkey,
                         model=model,
@@ -202,6 +203,7 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                             "success": r.status_code < 400,
                         },
                         friendly_name=friendly_name,
+                        email=email,
                     )
 
             logger.info(f"Circuit API response: {r.status_code}")

@@ -181,13 +181,14 @@ def main():
         total_tokens = event_data.get('total_tokens', 0)
         requests = event_data.get('requests', 1)
         
-        # Look up friendly name for the subkey
+        # Look up friendly name and email for the subkey
         friendly_name = None
+        email = None
         if subkey != 'unknown':
             try:
-                friendly_name = quota_manager.get_friendly_name(subkey)
+                friendly_name, email = quota_manager.get_name_and_email(subkey)
             except Exception:
-                pass  # If lookup fails, continue without name
+                pass  # If lookup fails, continue without name/email
         
         # Additional fields (including original timestamp)
         additional_fields = {}
@@ -219,6 +220,7 @@ def main():
                 additional_fields=additional_fields,
                 preserve_timestamp=True,  # Use timestamp from log, not current time
                 friendly_name=friendly_name,
+                email=email,
             )
             
             if success:

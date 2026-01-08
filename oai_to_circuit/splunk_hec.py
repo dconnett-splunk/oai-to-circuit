@@ -77,6 +77,7 @@ class SplunkHEC:
         additional_fields: Optional[Dict[str, Any]] = None,
         preserve_timestamp: bool = False,
         friendly_name: Optional[str] = None,
+        email: Optional[str] = None,
     ) -> bool:
         """
         Send a usage event to Splunk HEC.
@@ -91,6 +92,7 @@ class SplunkHEC:
             additional_fields: Extra fields to include in the event
             preserve_timestamp: Whether to preserve timestamp from additional_fields
             friendly_name: Optional friendly name for the subkey
+            email: Optional email for the subkey
             
         Returns:
             True if event was sent successfully, False otherwise
@@ -118,9 +120,11 @@ class SplunkHEC:
             "timestamp": timestamp_iso,
         }
         
-        # Add friendly name if provided
+        # Add friendly name and email if provided
         if friendly_name:
             event_data["friendly_name"] = friendly_name
+        if email:
+            event_data["email"] = email
         
         if additional_fields:
             # Don't duplicate timestamp if we already used it
@@ -223,6 +227,7 @@ class SplunkHEC:
         model: Optional[str] = None,
         additional_fields: Optional[Dict[str, Any]] = None,
         friendly_name: Optional[str] = None,
+        email: Optional[str] = None,
     ) -> bool:
         """
         Send an error event to Splunk HEC.
@@ -234,6 +239,7 @@ class SplunkHEC:
             model: Optional model name
             additional_fields: Extra fields to include
             friendly_name: Optional friendly name for the subkey
+            email: Optional email for the subkey
             
         Returns:
             True if event was sent successfully, False otherwise
@@ -260,6 +266,8 @@ class SplunkHEC:
             event_data["model"] = model
         if friendly_name:
             event_data["friendly_name"] = friendly_name
+        if email:
+            event_data["email"] = email
         if additional_fields:
             event_data.update(additional_fields)
 
