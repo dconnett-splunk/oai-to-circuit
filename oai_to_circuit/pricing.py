@@ -7,7 +7,7 @@ available through the Circuit API.
 Pricing is based on OpenAI and public cloud AI pricing as of January 2026.
 Update these values as Circuit pricing changes or new models are added.
 """
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, List, List
 import logging
 
 logger = logging.getLogger("oai_to_circuit.pricing")
@@ -195,7 +195,7 @@ def format_cost(cost: float) -> str:
         return f"${cost:.2f}"
 
 
-def list_known_models() -> list[str]:
+def list_known_models() -> List[str]:
     """
     Get list of all models with known pricing.
     

@@ -1,7 +1,7 @@
 import json
 import logging
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional, AsyncIterator
+from typing import Any, Dict, Optional, AsyncIterator, Tuple, Tuple
 
 import httpx
 from fastapi import FastAPI, Request, Response, HTTPException
@@ -28,7 +28,7 @@ def extract_subkey(request: Request) -> Optional[str]:
 async def parse_sse_stream(
     response: httpx.Response,
     logger: logging.Logger
-) -> AsyncIterator[tuple[bytes, Optional[Dict[str, int]]]]:
+) -> AsyncIterator[Tuple[bytes, Optional[Dict[str, int]]]]:
     """
     Parse SSE (Server-Sent Events) stream and extract usage data.
     
