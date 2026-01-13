@@ -44,6 +44,7 @@ flowchart LR
     QuotaDB[(quota.db)]
     IdP[Cisco IdP<br/>OAuth2]
     Circuit[Circuit API]
+    Splunk[Splunk HEC<br/>Analytics]
     
     Client -->|"1. OpenAI Format<br/>/v1/chat/completions"| App
     App -->|2. Check| Quota
@@ -52,6 +53,7 @@ flowchart LR
     OAuth -.->|Refresh| IdP
     Rewriter -->|"4. Circuit Format<br/>/openai/deployments/{model}/..."| Circuit
     Circuit -->|5. Response| App
+    App -.->|"7. Usage Events<br/>(async)"| Splunk
     App -->|6. Return| Client
 ```
 
@@ -162,7 +164,12 @@ sequenceDiagram
    - Records token usage in `quota.db` for subkey tracking
    - Returns raw response to client
 
-7. **Quota Tracking**: Post-response usage data stored in SQLite for enforcement
+7. **Usage Analytics** (Async):
+   - Sends usage events to Splunk HEC with metrics (tokens, cost, friendly_name)
+   - Non-blocking operation - failures don't affect API response
+   - Includes error events for quota exceeded or authentication failures
+
+8. **Quota Tracking**: Post-response usage data stored in SQLite for enforcement
 
 
 ## Components
