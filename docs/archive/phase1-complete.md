@@ -33,7 +33,7 @@ The following steps must be performed by someone with production access:
 ssh production-server
 
 # Edit credentials file
-sudo nano /etc/oai-to-circuit/credentials.env
+sudo vim /etc/oai-to-circuit/credentials.env
 
 # Add this line:
 LOG_LEVEL=DEBUG
@@ -87,7 +87,7 @@ Review the logs and document:
 
 After collecting data:
 ```bash
-sudo nano /etc/oai-to-circuit/credentials.env
+sudo vim /etc/oai-to-circuit/credentials.env
 # Change LOG_LEVEL=DEBUG back to LOG_LEVEL=INFO
 sudo systemctl restart oai-to-circuit
 ```
