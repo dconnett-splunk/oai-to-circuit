@@ -187,7 +187,7 @@ cd /opt/oai-to-circuit && sudo pip3 install -r requirements.txt
 
 # 3. Configure credentials
 sudo cp credentials.env.example /etc/oai-to-circuit/credentials.env
-sudo vi /etc/oai-to-circuit/credentials.env
+sudo vim /etc/oai-to-circuit/credentials.env
 
 # 4. Install service
 sudo cp oai-to-circuit.service /etc/systemd/system/

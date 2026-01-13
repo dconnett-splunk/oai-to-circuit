@@ -28,7 +28,7 @@ New diagnostic logging in `oai_to_circuit/app.py` that captures:
 
 1. Edit the credentials file:
    ```bash
-   sudo vi /etc/oai-to-circuit/credentials.env
+   sudo vim /etc/oai-to-circuit/credentials.env
    ```
 
 2. Add or update the LOG_LEVEL variable:
@@ -187,7 +187,7 @@ Once you've collected this data:
 After collecting diagnostic data, return to normal logging:
 
 ```bash
-sudo vi /etc/oai-to-circuit/credentials.env
+sudo vim /etc/oai-to-circuit/credentials.env
 # Change LOG_LEVEL=DEBUG to LOG_LEVEL=INFO
 sudo systemctl restart oai-to-circuit
 ```
