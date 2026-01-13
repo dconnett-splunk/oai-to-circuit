@@ -48,7 +48,7 @@ Added production deployment support with systemd and Splunk HTTP Event Collector
 ### 3. Documentation
 
 **New Files:**
-- `INSTALLATION.md` - Complete installation guide
+- [Installation Guide](../getting-started/installation.md) - Complete installation guide
   - User creation
   - Directory setup
   - Credential management
@@ -56,7 +56,7 @@ Added production deployment support with systemd and Splunk HTTP Event Collector
   - Firewall configuration
   - Troubleshooting
   
-- `DEPLOYMENT_QUICKSTART.md` - Quick deployment reference
+- [Deployment Guide](../deployment/deployment-guide.md) - Quick deployment reference
   - Essential commands
   - Quick install steps
   - Common operations

@@ -1,6 +1,8 @@
-## Architecture
+# Architecture
 
-### What this bridge does
+> **Navigation:** [Documentation Home](../README.md) | [Architecture](./) | [Getting Started](../getting-started/)
+
+## What this bridge does
 
 - **Rewrites OpenAI-format requests into Circuit's deployment-based API format**
   - Accepts OpenAI-compatible requests at `/v1/chat/completions`
@@ -132,7 +134,7 @@ Run tests with: `pytest`
 ### Deployment
 
 - `oai-to-circuit.service`: Systemd unit file for production deployment
-- `INSTALLATION.md`: Complete installation guide for systemd-based Linux systems
+- [Installation Guide](../getting-started/installation.md): Complete installation guide for systemd-based Linux systems
 
 
 ## Endpoint behavior
@@ -438,7 +440,7 @@ The `/health` endpoint returns JSON including `credentials_configured` and `appk
 - `tests/`: Comprehensive unit test suite (run with `pytest`).
 - `debug_invalid_http.py`: Diagnostics for "Invalid HTTP request received" scenarios.
 - `oai-to-circuit.service`: Systemd unit file for production deployment.
-- `INSTALLATION.md`: Complete installation and deployment guide.
+- [Installation Guide](../getting-started/installation.md): Complete installation and deployment guide.
 
 
 ## Frequently used URLs
@@ -446,5 +448,16 @@ The `/health` endpoint returns JSON including `credentials_configured` and `appk
 - OAuth2 Token Endpoint: `https://id.cisco.com/oauth2/default/v1/token`
 - Circuit Base: `https://chat-ai.cisco.com`
 - Forwarded Path Template: `/openai/deployments/{model}/chat/completions?api-version=2025-04-01-preview`
+
+---
+
+## Related Documentation
+
+- [Installation Guide](../getting-started/installation.md) - Install from scratch
+- [Deployment Guide](../deployment/deployment-guide.md) - Deploy and update
+- [Subkey Management](../operations/subkey-management.md) - Manage API keys
+- [Operations Guides](../operations/) - Day-to-day operations
+
+**[← Back to Documentation Home](../README.md)**
 
 

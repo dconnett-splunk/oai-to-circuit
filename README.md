@@ -11,13 +11,20 @@ A minimal local webserver that translates standard OpenAI-style requests into Ci
 - Health endpoint: `GET /health`
 - Verbose, colorized logging (with process tags in dual mode)
 
-## Quick Start
+## Documentation
 
-- **Local Development**: See `QUICKSTART.md` or `QUICKSTART.org` for step-by-step setup
-- **Production Installation**: See `INSTALLATION.md` for systemd service setup  
-- **Deploying Updates**: See `DEPLOYMENT.md` for update procedures
+📚 **[Complete Documentation](docs/README.md)** - Browse all documentation
 
-**Production:** See `DEPLOYMENT_QUICKSTART.md` for systemd deployment or `INSTALLATION.md` for complete installation guide.
+### Quick Links
+
+- 🚀 **[Quick Start Guide](docs/getting-started/quickstart.md)** - Get up and running in minutes
+- 📦 **[Installation Guide](docs/getting-started/installation.md)** - Complete systemd setup
+- 🚢 **[Deployment Guide](docs/deployment/deployment-guide.md)** - Deploy updates and manage releases
+- 🏗️ **[Architecture Overview](docs/architecture/architecture.md)** - How the system works
+- 🔑 **[Subkey Management](docs/operations/subkey-management.md)** - Manage API keys and quotas
+- 📊 **[Operations Guides](docs/operations/)** - Day-to-day operations
+
+**Production Deployment:** See the [Deployment Guide](docs/deployment/deployment-guide.md) for complete deployment procedures.
 
 ## Usage
 
@@ -214,3 +221,20 @@ Usage examples:
 
 - [Cisco CIRCUIT Chat API](https://ai-chat.cisco.com/bridgeit-platform/api/home)
 - See `circuit_api.org` for API details.
+
+---
+
+## Documentation Structure
+
+All comprehensive documentation has been moved to the [`docs/`](docs/) folder for better organization:
+
+- **[docs/getting-started/](docs/getting-started/)** - Installation and quick start guides
+- **[docs/deployment/](docs/deployment/)** - Deployment procedures
+- **[docs/architecture/](docs/architecture/)** - System design and architecture
+- **[docs/operations/](docs/operations/)** - Operations and management
+- **[docs/guides/](docs/guides/)** - Specialized guides
+- **[docs/migrations/](docs/migrations/)** - Database migrations and changelogs
+- **[docs/reference/](docs/reference/)** - Reference documentation
+- **[docs/archive/](docs/archive/)** - Historical documents
+
+**[Browse Complete Documentation →](docs/README.md)**

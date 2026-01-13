@@ -1,6 +1,8 @@
 # Installation Guide
 
-> **Note**: This guide covers initial installation from scratch. For deploying updates to an existing installation, see [DEPLOYMENT.md](DEPLOYMENT.md).
+> **Navigation:** [Documentation Home](../README.md) | [Getting Started](./) | [Quick Start](quickstart.md)
+
+> **Note**: This guide covers initial installation from scratch. For deploying updates to an existing installation, see [Deployment Guide](../deployment/deployment-guide.md).
 
 ## Systemd Service Installation
 
@@ -316,4 +318,16 @@ sudo cp /var/lib/oai-to-circuit/quota.db /backup/quota.db.$(date +%Y%m%d)
 # Automated daily backup (crontab)
 0 2 * * * cp /var/lib/oai-to-circuit/quota.db /backup/quota.db.$(date +\%Y\%m\%d)
 ```
+
+---
+
+## Related Documentation
+
+- [Quick Start Guide](quickstart.md) - Get started in 5 minutes
+- [Production Setup](production-setup.md) - Production best practices
+- [Deployment Guide](../deployment/deployment-guide.md) - Deploying updates
+- [Architecture Overview](../architecture/architecture.md) - System design
+- [Subkey Management](../operations/subkey-management.md) - Managing API keys
+
+**[← Back to Documentation Home](../README.md)**
 

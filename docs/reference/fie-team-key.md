@@ -133,7 +133,7 @@ Contact your administrator with:
 ## Questions?
 
 See full documentation:
-- [SUBKEY_MANAGEMENT.md](SUBKEY_MANAGEMENT.md) - Complete subkey guide
-- [QUICKSTART.md](QUICKSTART.md) - Getting started
+- [Subkey Management](../operations/subkey-management.md) - Complete subkey guide
+- [Quick Start Guide](../getting-started/quickstart.md) - Getting started
 - [README.md](README.md) - Full project documentation
 
