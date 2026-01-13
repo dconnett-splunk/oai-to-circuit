@@ -49,12 +49,12 @@ sudo chmod 750 /etc/oai-to-circuit
 
 # 4. Configure credentials
 sudo cp credentials.env.example /etc/oai-to-circuit/credentials.env
-sudo vim /etc/oai-to-circuit/credentials.env  # Edit with your credentials
+sudo vi /etc/oai-to-circuit/credentials.env  # Edit with your credentials
 sudo chmod 640 /etc/oai-to-circuit/credentials.env
 
 # 5. Configure quotas (optional)
 sudo cp quotas.json.example /etc/oai-to-circuit/quotas.json
-sudo vim /etc/oai-to-circuit/quotas.json  # Edit quota rules
+sudo vi /etc/oai-to-circuit/quotas.json  # Edit quota rules
 sudo chmod 640 /etc/oai-to-circuit/quotas.json
 
 # 6. Install and start service
@@ -98,7 +98,7 @@ sudo systemctl stop oai-to-circuit
 sudo systemctl status oai-to-circuit
 
 # Edit configuration
-sudo vim /etc/oai-to-circuit/credentials.env
+sudo vi /etc/oai-to-circuit/credentials.env
 sudo systemctl restart oai-to-circuit
 
 # View recent logs
@@ -142,7 +142,7 @@ sudo chmod 600 /etc/oai-to-circuit/key.pem
 sudo chmod 644 /etc/oai-to-circuit/cert.pem
 
 # Edit service to use SSL
-sudo vim /etc/systemd/system/oai-to-circuit.service
+sudo vi /etc/systemd/system/oai-to-circuit.service
 # Change ExecStart line to: ExecStart=/usr/bin/python3 /opt/oai-to-circuit/rewriter.py --ssl
 
 sudo systemctl daemon-reload
@@ -279,7 +279,7 @@ Use this checklist for each deployment:
 
 ```bash
 # Edit credentials file
-sudo vim /etc/oai-to-circuit/credentials.env
+sudo vi /etc/oai-to-circuit/credentials.env
 # Add new variables
 
 # Restart service to apply
@@ -529,7 +529,7 @@ git stash pop  # Re-apply local changes (may need manual merge)
 sudo journalctl -u oai-to-circuit -f | grep "SSE PARSER\|STREAMING"
 
 # Enable debug logging temporarily
-sudo vim /etc/oai-to-circuit/credentials.env
+sudo vi /etc/oai-to-circuit/credentials.env
 # Add: LOG_LEVEL=DEBUG
 sudo systemctl restart oai-to-circuit
 
@@ -605,7 +605,7 @@ systemctl restart oai-to-circuit
 ```bash
 cd /opt/oai-to-circuit
 git pull
-vim /etc/oai-to-circuit/credentials.env
+vi /etc/oai-to-circuit/credentials.env
 # Add: NEW_VAR=value
 systemctl restart oai-to-circuit
 ```

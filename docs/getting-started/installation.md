@@ -70,7 +70,7 @@ Copy and edit the quotas file:
 
 ```bash
 sudo cp /opt/oai-to-circuit/quotas.json.example /etc/oai-to-circuit/quotas.json
-sudo vim /etc/oai-to-circuit/quotas.json
+sudo vi /etc/oai-to-circuit/quotas.json
 sudo chmod 640 /etc/oai-to-circuit/quotas.json
 sudo chown root:oai-bridge /etc/oai-to-circuit/quotas.json
 ```
@@ -148,7 +148,7 @@ sudo chmod 644 /etc/oai-to-circuit/cert.pem
 Edit the systemd unit file to use SSL:
 
 ```bash
-sudo vim /etc/systemd/system/oai-to-circuit.service
+sudo vi /etc/systemd/system/oai-to-circuit.service
 ```
 
 Change the `ExecStart` line to:
@@ -304,7 +304,7 @@ Set up monitoring alerts for service failures:
 
 ```bash
 # Example: Send email on service failure
-sudo vim /etc/systemd/system/oai-to-circuit-alert@.service
+sudo vi /etc/systemd/system/oai-to-circuit-alert@.service
 ```
 
 ## Backup
