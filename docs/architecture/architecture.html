@@ -1,0 +1,609 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+	"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+<title>ARCHITECTURE.html</title>
+<meta http-equiv="Content-Type" content="application/xhtml+xml;charset=utf-8"/>
+<link rel="stylesheet" type="text/css" media="all" href="https://cdn.jsdelivr.net/npm/github-markdown-css/github-markdown.min.css"  />
+<link rel="stylesheet" type="text/css" media="all" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release/build/styles/github.min.css"  /><meta name='viewport' content='width=device-width, initial-scale=1, shrink-to-fit=no'><style> body { box-sizing: border-box; max-width: 740px; width: 100%; margin: 40px auto; padding: 0 10px; } </style><script id='MathJax-script' async src='https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js'></script><script src='https://cdn.jsdelivr.net/gh/highlightjs/cdn-release/build/highlight.min.js'></script><script>document.addEventListener('DOMContentLoaded', () => { document.body.classList.add('markdown-body'); document.querySelectorAll('pre[lang] > code').forEach((code) => { code.classList.add(code.parentElement.lang); }); document.querySelectorAll('pre > code').forEach((code) => { hljs.highlightBlock(code); }); });</script>
+</head>
+
+<body>
+
+[WARNING] Deprecated: --highlight-style. Use --syntax-highlighting instead.
+<h2 id="architecture">Architecture</h2>
+<h3 id="what-this-bridge-does">What this bridge does</h3>
+<ul>
+<li><strong>Rewrites OpenAI-format requests into Circuit’s
+deployment-based API format</strong>
+<ul>
+<li>Accepts OpenAI-compatible requests at
+<code>/v1/chat/completions</code></li>
+<li>Transforms URL structure: <code>/v1/chat/completions</code> →
+<code>/openai/deployments/{model}/chat/completions?api-version=...</code></li>
+<li>Translates authentication from OpenAI API keys to Circuit OAuth2
+tokens</li>
+<li>Injects Circuit-specific metadata (appkey)</li>
+</ul></li>
+<li>Exposes a minimal surface:
+<ul>
+<li>POST <code>/v1/chat/completions</code> (OpenAI format in, Circuit
+format out)</li>
+<li>GET <code>/health</code></li>
+</ul></li>
+<li>Obtains and caches OAuth2 access tokens for Circuit
+authentication</li>
+<li>Runs HTTP, HTTPS (self-signed), or dual-mode servers</li>
+</ul>
+<h2 id="architecture-overview">Architecture Overview</h2>
+<pre class="mermaid"><code>flowchart LR
+    Client[Client&lt;br/&gt;OpenAI SDK/CLI]
+    
+    subgraph Bridge[&quot;Bridge Server - OpenAI to Circuit Translator&quot;]
+        direction TB
+        Entry[rewriter.py]
+        Server[server.py&lt;br/&gt;uvicorn]
+        App[app.py&lt;br/&gt;FastAPI]
+        
+        subgraph Processing[&quot;Request Processing&quot;]
+            Subkey[Subkey&lt;br/&gt;Extraction]
+            Quota[Quota&lt;br/&gt;Manager]
+            OAuth[OAuth&lt;br/&gt;Token Cache]
+        end
+        
+        Rewriter[Request Rewriter&lt;br/&gt;OpenAI → Circuit]
+        
+        Entry --&gt; Server --&gt; App
+        App --&gt; Processing
+        Processing --&gt; Rewriter
+    end
+    
+    QuotaDB[(quota.db)]
+    IdP[Cisco IdP&lt;br/&gt;OAuth2]
+    Circuit[Circuit API]
+    
+    Client --&gt;|&quot;1. OpenAI Format&lt;br/&gt;/v1/chat/completions&quot;| App
+    App --&gt;|2. Check| Quota
+    Quota &lt;--&gt;|Read/Write| QuotaDB
+    App --&gt;|3. Get Token| OAuth
+    OAuth -.-&gt;|Refresh| IdP
+    Rewriter --&gt;|&quot;4. Circuit Format&lt;br/&gt;/openai/deployments/{model}/...&quot;| Circuit
+    Circuit --&gt;|5. Response| App
+    App --&gt;|6. Return| Client</code></pre>
+<h3 id="request-flow">Request Flow</h3>
+<ol type="1">
+<li><p><strong>Client Request</strong>: Client sends OpenAI-format
+request to <code>/v1/chat/completions</code> (HTTP or HTTPS)</p>
+<ul>
+<li>Includes <code>model</code> parameter and OpenAI-style payload</li>
+<li>Provides subkey via <code>X-Bridge-Subkey</code> header or
+<code>Authorization: Bearer &lt;subkey&gt;</code></li>
+</ul></li>
+<li><p><strong>Subkey &amp; Quota Check</strong>:</p>
+<ul>
+<li><code>extract_subkey()</code> parses headers to identify caller</li>
+<li><code>QuotaManager</code> checks if request is allowed based on
+configured limits</li>
+<li>Returns <code>429</code> if quota exceeded; otherwise continues</li>
+</ul></li>
+<li><p><strong>OAuth Token Management</strong>:</p>
+<ul>
+<li><code>get_access_token()</code> checks in-memory
+<code>TokenCache</code></li>
+<li>If expired (&lt; 60s remaining), fetches new token from Cisco
+IdP</li>
+<li>Uses client credentials flow with <code>CIRCUIT_CLIENT_ID</code> and
+<code>CIRCUIT_CLIENT_SECRET</code></li>
+</ul></li>
+<li><p><strong>Request Transformation (OpenAI → Circuit)</strong>:</p>
+<ul>
+<li><strong>Incoming</strong>: OpenAI-format request to
+<code>/v1/chat/completions</code> with model parameter</li>
+<li><strong>Rewriting</strong>:
+<ul>
+<li>Injects <code>CIRCUIT_APPKEY</code> into <code>user</code>
+field</li>
+<li>Rewrites URL from OpenAI format to Circuit deployment format:
+<ul>
+<li>From: <code>/v1/chat/completions</code></li>
+<li>To:
+<code>https://chat-ai.cisco.com/openai/deployments/{model}/chat/completions?api-version=2025-04-01-preview</code></li>
+</ul></li>
+<li>Replaces authentication: Sets <code>api-key</code> header with
+OAuth2 access token</li>
+</ul></li>
+<li><strong>Outgoing</strong>: Circuit-compatible request ready for
+forwarding</li>
+</ul></li>
+<li><p><strong>Forward to Circuit</strong>: Bridge proxies transformed
+request to Circuit API</p></li>
+<li><p><strong>Response Handling</strong>:</p>
+<ul>
+<li>Receives response from Circuit (may include
+<code>usage.total_tokens</code>)</li>
+<li>Records token usage in <code>quota.db</code> for subkey
+tracking</li>
+<li>Returns raw response to client</li>
+</ul></li>
+<li><p><strong>Quota Tracking</strong>: Post-response usage data stored
+in SQLite for enforcement</p></li>
+</ol>
+<h2 id="components">Components</h2>
+<h3 id="core-package-oai_to_circuit">Core Package
+(<code>oai_to_circuit/</code>)</h3>
+<ul>
+<li><code>server.py</code>: Server entrypoint with CLI argument parsing
+and uvicorn startup (HTTP/HTTPS/dual-mode).</li>
+<li><code>app.py</code>: FastAPI application factory and endpoint
+handlers.
+<ul>
+<li>Endpoints: <code>/health</code>,
+<code>/v1/chat/completions</code></li>
+<li>Request rewrite/proxy to Circuit with quota enforcement</li>
+<li>Subkey extraction from headers</li>
+<li>Splunk HEC integration for usage metrics</li>
+</ul></li>
+<li><code>oauth.py</code>: OAuth2 client credentials flow with in-memory
+token caching.</li>
+<li><code>quota.py</code>: QuotaManager for per-subkey, per-model usage
+tracking (SQLite) and quota loading from env/JSON.</li>
+<li><code>config.py</code>: Configuration dataclass and environment
+variable loading.</li>
+<li><code>logging_config.py</code>: Unified logging configuration with
+colorized output and logger renaming filters.</li>
+<li><code>splunk_hec.py</code>: Splunk HTTP Event Collector client for
+streaming usage and error events to Splunk.</li>
+</ul>
+<h3 id="entry-points">Entry Points</h3>
+<ul>
+<li><code>rewriter.py</code>: Thin wrapper that imports and starts the
+server from <code>oai_to_circuit.server</code>.</li>
+</ul>
+<h3 id="development-tools">Development Tools</h3>
+<ul>
+<li><code>generate_cert.py</code>: Self-signed certificate generator for
+local HTTPS development.</li>
+<li><code>examples.py</code>, <code>python_openai_demo.py</code>: Usage
+examples demonstrating curl and OpenAI SDK integration.</li>
+<li><code>debug_invalid_http.py</code>: Diagnostics script for
+troubleshooting common connection issues.</li>
+</ul>
+<h3 id="tests-tests">Tests (<code>tests/</code>)</h3>
+<ul>
+<li><code>test_quota.py</code>: QuotaManager request/token limit
+enforcement.</li>
+<li><code>test_quota_loading.py</code>: Quota configuration loading from
+env/file.</li>
+<li><code>test_subkey_extraction.py</code>: Header parsing for caller
+subkey identification.</li>
+<li><code>test_requests.py</code>: End-to-end FastAPI endpoint behavior
+(health, chat completions, error cases).</li>
+<li><code>test_config.py</code>: Environment variable and default
+configuration loading.</li>
+<li><code>test_oauth.py</code>: Token caching, expiry, and missing
+credential handling.</li>
+<li><code>test_logging_config.py</code>: Logger renaming filter
+behavior.</li>
+<li><code>test_https.py</code>: Server SSL configuration
+validation.</li>
+<li><code>test_splunk_hec.py</code>: Splunk HEC integration, event
+formatting, and error handling.</li>
+</ul>
+<p>Run tests with: <code>pytest</code></p>
+<h3 id="deployment">Deployment</h3>
+<ul>
+<li><code>oai-to-circuit.service</code>: Systemd unit file for
+production deployment</li>
+<li><code>INSTALLATION.md</code>: Complete installation guide for
+systemd-based Linux systems</li>
+</ul>
+<h2 id="endpoint-behavior">Endpoint behavior</h2>
+<h3 id="get-health">GET <code>/health</code></h3>
+<ul>
+<li>Returns service status and flags indicating whether
+credentials/appkey are configured.</li>
+</ul>
+<h3 id="post-v1chatcompletions">POST
+<code>/v1/chat/completions</code></h3>
+<ul>
+<li>Input: OpenAI-style payload (<code>model</code>,
+<code>messages</code>, plus optional params like
+<code>temperature</code>, <code>stream</code>, etc.).</li>
+<li>Required: <code>model</code> must be provided; otherwise 400 is
+returned.</li>
+<li>The bridge:
+<ul>
+<li>Parses JSON, validates <code>model</code>, logs headers/body for
+debugging (at debug level).</li>
+<li>Ensures a valid OAuth2 token via <code>get_access_token()</code>.
+Tokens are cached in memory until ~60s before expiry.</li>
+<li>Extracts a caller subkey from <code>X-Bridge-Subkey</code> or
+<code>Authorization: Bearer &lt;subkey&gt;</code> and enforces request
+quotas if configured.</li>
+<li>Injects an <code>appkey</code> into the <code>user</code> field if
+not present (or merges it if <code>user</code> is valid JSON). The
+<code>CIRCUIT_APPKEY</code> is read from environment variables.</li>
+<li>Forwards the transformed request to Circuit at:
+<ul>
+<li><code>https://chat-ai.cisco.com/openai/deployments/{model}/chat/completions?api-version=2025-04-01-preview</code></li>
+</ul></li>
+<li>Sets headers for the upstream request:
+<ul>
+<li><code>Content-Type: application/json</code></li>
+<li><code>Accept: application/json</code></li>
+<li><code>api-key: &lt;OAuth2 access token&gt;</code></li>
+</ul></li>
+</ul></li>
+<li>Output: The raw upstream body is returned with the upstream
+<code>Content-Type</code> when available (no additional transformation).
+Post-response, token usage (if present) is recorded for quotas.
+<ul>
+<li>Note: Responses are currently returned as a single body; the bridge
+does not re-stream chunked responses.</li>
+</ul></li>
+</ul>
+<h2 id="oauth2-and-token-caching">OAuth2 and token caching</h2>
+<ul>
+<li>Flow: Client Credentials against Cisco IdP
+(<code>TOKEN_URL = https://id.cisco.com/oauth2/default/v1/token</code>).</li>
+<li>The bridge forms a Basic auth header from
+<code>CIRCUIT_CLIENT_ID:CIRCUIT_CLIENT_SECRET</code>, requests
+<code>grant_type=client_credentials</code>, and caches
+<code>access_token</code> and <code>expires_in</code>.</li>
+<li>Cache policy: If current time is within 60 seconds of expiry, a new
+token is fetched; otherwise the cached token is reused.</li>
+<li>Storage: In-memory (per-process). In dual-mode, each process
+maintains its own cache (potential duplicate fetches are
+acceptable).</li>
+</ul>
+<h2 id="splunk-hec-integration-optional">Splunk HEC Integration
+(Optional)</h2>
+<p>The bridge can stream usage metrics to Splunk HTTP Event Collector
+for real-time analytics and monitoring.</p>
+<h3 id="configuration">Configuration</h3>
+<p>Set these environment variables to enable Splunk HEC: -
+<code>SPLUNK_HEC_URL</code>: Full URL to Splunk HEC endpoint (e.g.,
+<code>https://splunk.example.com:8088/services/collector/event</code>) -
+<code>SPLUNK_HEC_TOKEN</code>: HEC authentication token -
+<code>SPLUNK_SOURCE</code> (optional, default:
+<code>oai-to-circuit</code>): Event source name -
+<code>SPLUNK_SOURCETYPE</code> (optional, default:
+<code>llm:usage</code>): Event sourcetype - <code>SPLUNK_INDEX</code>
+(optional, default: <code>main</code>): Target Splunk index</p>
+<h3 id="event-types">Event Types</h3>
+<p><strong>Usage Events</strong> (sent after each API request):</p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;time&quot;</span><span class="fu">:</span> <span class="fl">1703001234.567</span><span class="fu">,</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;event&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;subkey&quot;</span><span class="fu">:</span> <span class="st">&quot;team_member_alice&quot;</span><span class="fu">,</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;model&quot;</span><span class="fu">:</span> <span class="st">&quot;gpt-4o-mini&quot;</span><span class="fu">,</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;requests&quot;</span><span class="fu">:</span> <span class="dv">1</span><span class="fu">,</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;prompt_tokens&quot;</span><span class="fu">:</span> <span class="dv">150</span><span class="fu">,</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;completion_tokens&quot;</span><span class="fu">:</span> <span class="dv">200</span><span class="fu">,</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;total_tokens&quot;</span><span class="fu">:</span> <span class="dv">350</span><span class="fu">,</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;status_code&quot;</span><span class="fu">:</span> <span class="dv">200</span><span class="fu">,</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;success&quot;</span><span class="fu">:</span> <span class="kw">true</span><span class="fu">,</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;timestamp&quot;</span><span class="fu">:</span> <span class="st">&quot;2024-12-18T10:30:45.123456Z&quot;</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">},</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;source&quot;</span><span class="fu">:</span> <span class="st">&quot;oai-to-circuit&quot;</span><span class="fu">,</span></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;sourcetype&quot;</span><span class="fu">:</span> <span class="st">&quot;llm:usage&quot;</span><span class="fu">,</span></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;index&quot;</span><span class="fu">:</span> <span class="st">&quot;main&quot;</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p><strong>Error Events</strong> (sent when quotas exceeded or other
+errors):</p>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;time&quot;</span><span class="fu">:</span> <span class="fl">1703001234.567</span><span class="fu">,</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;event&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;event_type&quot;</span><span class="fu">:</span> <span class="st">&quot;error&quot;</span><span class="fu">,</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;error_type&quot;</span><span class="fu">:</span> <span class="st">&quot;quota_exceeded&quot;</span><span class="fu">,</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;error_message&quot;</span><span class="fu">:</span> <span class="st">&quot;Request quota exceeded for model gpt-4o&quot;</span><span class="fu">,</span></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;subkey&quot;</span><span class="fu">:</span> <span class="st">&quot;team_member_alice&quot;</span><span class="fu">,</span></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;model&quot;</span><span class="fu">:</span> <span class="st">&quot;gpt-4o&quot;</span><span class="fu">,</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;timestamp&quot;</span><span class="fu">:</span> <span class="st">&quot;2024-12-18T10:30:45.123456Z&quot;</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">},</span></span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;source&quot;</span><span class="fu">:</span> <span class="st">&quot;oai-to-circuit&quot;</span><span class="fu">,</span></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;sourcetype&quot;</span><span class="fu">:</span> <span class="st">&quot;llm:usage:error&quot;</span><span class="fu">,</span></span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;index&quot;</span><span class="fu">:</span> <span class="st">&quot;main&quot;</span></span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<h3 id="behavior">Behavior</h3>
+<ul>
+<li><strong>Non-blocking</strong>: HEC requests are made with a 5-second
+timeout and failures do not affect API responses</li>
+<li><strong>Automatic</strong>: Events are sent automatically when
+configured; no additional action required</li>
+<li><strong>Optional</strong>: If <code>SPLUNK_HEC_URL</code> or
+<code>SPLUNK_HEC_TOKEN</code> are not set, HEC is disabled</li>
+</ul>
+<h3 id="splunk-queries">Splunk Queries</h3>
+<p><strong>Total usage by user and model:</strong></p>
+<pre class="spl"><code>index=main sourcetype=llm:usage
+| stats sum(requests) as total_requests, sum(total_tokens) as total_tokens by subkey, model
+| sort -total_tokens</code></pre>
+<p><strong>Quota exceeded events:</strong></p>
+<pre class="spl"><code>index=main sourcetype=llm:usage:error error_type=quota_exceeded
+| stats count by subkey, model
+| sort -count</code></pre>
+<p><strong>Token usage over time:</strong></p>
+<pre class="spl"><code>index=main sourcetype=llm:usage
+| timechart span=1h sum(total_tokens) by model</code></pre>
+<h2 id="configuration-and-secrets">Configuration and secrets</h2>
+<ul>
+<li>Required environment variables:
+<ul>
+<li><code>CIRCUIT_CLIENT_ID</code></li>
+<li><code>CIRCUIT_CLIENT_SECRET</code></li>
+<li><code>CIRCUIT_APPKEY</code></li>
+</ul></li>
+<li>Quotas/subkeys (optional but recommended for shared API key
+scenarios):
+<ul>
+<li><code>REQUIRE_SUBKEY</code> (default: true) – require a caller
+subkey per request</li>
+<li><code>QUOTA_DB_PATH</code> (default: <code>quota.db</code>) – SQLite
+file for usage tracking</li>
+<li><code>QUOTAS_JSON</code> – inline JSON mapping
+subkey→model→limits</li>
+<li><code>QUOTAS_JSON_PATH</code> (default: <code>quotas.json</code>) –
+file to load quotas if <code>QUOTAS_JSON</code> unset</li>
+<li>Subkey is read from <code>X-Bridge-Subkey</code> or
+<code>Authorization: Bearer &lt;subkey&gt;</code> (used locally for
+quotas; not forwarded upstream)</li>
+</ul></li>
+<li>The bridge ignores the incoming <code>Authorization</code> value for
+upstream authentication; it is used only to identify the caller subkey.
+Upstream access control relies on the configured Circuit credentials and
+appkey.</li>
+<li>No secrets are hardcoded in the repository. Set them via environment
+variables or a secure secrets mechanism in your runtime
+environment.</li>
+</ul>
+<p>Security note (No Hardcoded Credentials policy): This project reads
+sensitive values from environment variables and never commits
+credentials to source. Ensure your deployment uses a proper secret
+manager (e.g., environment injection from your orchestrator) and never
+embeds secrets in code, images, or logs.</p>
+<h2 id="per-model-quotas-and-model-blacklisting">Per-Model Quotas and
+Model Blacklisting</h2>
+<p>The quota system supports <strong>per-model quotas</strong>, allowing
+you to: - Set different limits for each model (e.g., restrict expensive
+models like <code>gpt-4</code> or <code>o1-preview</code>) -
+<strong>Blacklist models entirely</strong> by setting their quota to
+<code>0</code> - Use wildcard <code>"*"</code> to set default limits for
+all models - Override wildcard limits with specific model
+configurations</p>
+<h3 id="quota-configuration-format">Quota Configuration Format</h3>
+<p>Quotas are defined in JSON format: <code>subkey</code> →
+<code>model</code> → <code>limits</code></p>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;team_member_alice&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;claude-3-opus&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;requests&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">},</span>   <span class="er">//</span> <span class="er">Blacklisted</span> <span class="er">-</span> <span class="er">too</span> <span class="er">expensive</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;claude-opus-4&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;requests&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">},</span>   <span class="er">//</span> <span class="er">Blacklisted</span> <span class="er">-</span> <span class="er">too</span> <span class="er">expensive</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;gpt-4o&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;requests&quot;</span><span class="fu">:</span> <span class="dv">10</span><span class="fu">},</span>         <span class="er">//</span> <span class="er">Limited</span> <span class="er">use</span> <span class="er">for</span> <span class="er">expensive</span> <span class="er">model</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;gpt-4o-mini&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;requests&quot;</span><span class="fu">:</span> <span class="dv">1000</span><span class="fu">},</span>  <span class="er">//</span> <span class="er">High</span> <span class="er">quota</span> <span class="er">for</span> <span class="er">cheap</span> <span class="er">model</span></span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;*&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;requests&quot;</span><span class="fu">:</span> <span class="dv">100</span><span class="fu">}</span>              <span class="er">//</span> <span class="er">Default</span> <span class="er">for</span> <span class="er">any</span> <span class="er">other</span> <span class="er">model</span></span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">},</span></span>
+<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;team_member_bob&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;gpt-4o-mini&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;requests&quot;</span><span class="fu">:</span> <span class="dv">500</span><span class="fu">,</span></span>
+<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a>      <span class="dt">&quot;total_tokens&quot;</span><span class="fu">:</span> <span class="dv">100000</span></span>
+<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a>    <span class="fu">},</span></span>
+<span id="cb7-14"><a href="#cb7-14" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;*&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;requests&quot;</span><span class="fu">:</span> <span class="dv">50</span><span class="fu">}</span></span>
+<span id="cb7-15"><a href="#cb7-15" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="cb7-16"><a href="#cb7-16" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<h3 id="how-model-blacklisting-works">How Model Blacklisting Works</h3>
+<p>To blacklist a model (prevent all access), set
+<code>requests: 0</code>:</p>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;subkey1&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;claude-3-opus&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;requests&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">},</span>      <span class="er">//</span> <span class="er">Completely</span> <span class="er">blocked</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;claude-opus-4&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;requests&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">},</span>      <span class="er">//</span> <span class="er">Completely</span> <span class="er">blocked</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;claude-3.5-sonnet&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;requests&quot;</span><span class="fu">:</span> <span class="dv">0</span><span class="fu">},</span>  <span class="er">//</span> <span class="er">Completely</span> <span class="er">blocked</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;*&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;requests&quot;</span><span class="fu">:</span> <span class="dv">100</span><span class="fu">}</span>                 <span class="er">//</span> <span class="er">Other</span> <span class="er">models</span> <span class="er">allowed</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<p>When a user tries to use a blacklisted model, they receive
+<code>HTTP 429</code> with the message:
+<code>"Quota exceeded for this subkey and model (requests)"</code></p>
+<h3 id="limit-types">Limit Types</h3>
+<ul>
+<li><code>requests</code>: Maximum number of API calls (set to
+<code>0</code> to blacklist)</li>
+<li><code>total_tokens</code>: Maximum total tokens (sum of prompt +
+completion tokens)</li>
+<li><code>prompt_tokens</code>: Maximum prompt tokens (not currently
+enforced, future use)</li>
+<li><code>completion_tokens</code>: Maximum completion tokens (not
+currently enforced, future use)</li>
+</ul>
+<h3 id="model-specific-vs-wildcard-limits">Model-Specific vs Wildcard
+Limits</h3>
+<ul>
+<li>Specific model limits <strong>override</strong> wildcard
+<code>"*"</code> limits</li>
+<li>If no limit is set for a model, wildcard limits apply</li>
+<li>If no wildcard exists and no model-specific limit exists, requests
+are <strong>allowed</strong> (unlimited)</li>
+</ul>
+<p>Example:</p>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode json"><code class="sourceCode json"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;user1&quot;</span><span class="fu">:</span> <span class="fu">{</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;*&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="dt">&quot;requests&quot;</span><span class="fu">:</span> <span class="dv">1000</span><span class="fu">},</span>         <span class="er">//</span> <span class="er">Default</span><span class="fu">:</span> <span class="dv">1000</span> <span class="er">requests</span> <span class="er">for</span> <span class="er">any</span> <span class="er">model</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;gpt-4o&quot;</span><span class="er">:</span> <span class="fu">{</span><span class="dt">&quot;requests&quot;</span><span class="fu">:</span> <span class="dv">20</span><span class="fu">}</span>       <span class="er">//</span> <span class="er">Override:</span> <span class="er">only</span> <span class="dv">20</span> <span class="er">for</span> <span class="er">this</span> <span class="er">expensive</span> <span class="er">model</span></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<h3 id="loading-quotas">Loading Quotas</h3>
+<p>Set quotas via environment variable or file:</p>
+<p><strong>Option 1: Environment variable (inline JSON)</strong></p>
+<div class="sourceCode" id="cb10"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">QUOTAS_JSON</span><span class="op">=</span><span class="st">&#39;{&quot;alice&quot;: {&quot;gpt-4&quot;: {&quot;requests&quot;: 0}, &quot;*&quot;: {&quot;requests&quot;: 100}}}&#39;</span></span></code></pre></div>
+<p><strong>Option 2: File (recommended for complex configs)</strong></p>
+<div class="sourceCode" id="cb11"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">QUOTAS_JSON_PATH</span><span class="op">=</span><span class="st">&quot;/path/to/quotas.json&quot;</span></span></code></pre></div>
+<p>If <code>QUOTAS_JSON</code> is not set, the bridge looks for
+<code>quotas.json</code> in the current directory (or path specified by
+<code>QUOTAS_JSON_PATH</code>).</p>
+<h2 id="https-and-certificates">HTTPS and certificates</h2>
+<ul>
+<li>Modes:
+<ul>
+<li>HTTP-only (default): <code>python rewriter.py</code></li>
+<li>HTTPS-only: <code>python rewriter.py --ssl-only</code></li>
+<li>Dual HTTP/HTTPS: <code>python rewriter.py --ssl</code></li>
+</ul></li>
+<li>Self-signed certs for development can be generated with
+<code>generate_cert.py</code> (writes <code>cert.pem</code> and
+<code>key.pem</code>).</li>
+<li>In HTTPS modes, <code>uvicorn</code> is started with
+<code>ssl_keyfile</code> and <code>ssl_certfile</code>. In dual mode,
+two processes are launched (one HTTP, one HTTPS).</li>
+</ul>
+<p>Certificate checks applied (per security guidelines): - The generated
+certificate uses RSA 2048-bit keys and is signed with SHA-256. These are
+acceptable (not weak; no SHA-1/MD5). - The certificate is self-signed
+(issuer == subject), which is expected for development. Do not use
+self-signed certs for public production services. - Validity is 1 year
+from creation. For production, use a proper CA-issued certificate with
+appropriate rotation and trust configuration.</p>
+<h2 id="error-handling">Error handling</h2>
+<ul>
+<li>400 Bad Request
+<ul>
+<li>Malformed JSON body.</li>
+<li>Missing <code>model</code> parameter.</li>
+</ul></li>
+<li>502 Bad Gateway
+<ul>
+<li>OAuth token request failure or unexpected upstream error while
+contacting Circuit.</li>
+</ul></li>
+<li>504 Gateway Timeout
+<ul>
+<li>Circuit did not respond within timeout window.</li>
+</ul></li>
+<li>404 Not Found
+<ul>
+<li>Any unsupported endpoint path on the bridge.</li>
+</ul></li>
+</ul>
+<p>The <code>/health</code> endpoint returns JSON including
+<code>credentials_configured</code> and <code>appkey_configured</code>
+flags to assist troubleshooting.</p>
+<h2 id="logging-and-observability">Logging and observability</h2>
+<ul>
+<li>Unified logging configuration with colorized output for the app,
+uvicorn, and asyncio.</li>
+<li>In dual mode, separate processes are named to clearly indicate HTTP
+vs HTTPS handling.</li>
+<li>Debug-level logs include request headers and bodies for diagnostics;
+use caution in production to avoid sensitive data exposure in logs.</li>
+</ul>
+<h2 id="deployment-considerations">Deployment considerations</h2>
+<ul>
+<li>Stateless service (aside from per-process in-memory token cache).
+Safe to run multiple replicas; each replica will manage its own token
+cache independently.</li>
+<li>Ports:
+<ul>
+<li>HTTP: 12000</li>
+<li>HTTPS: 12443</li>
+</ul></li>
+<li>Resource usage is minimal; throughput and latency are primarily
+bound by the upstream Circuit API.</li>
+</ul>
+<h2 id="current-limitations-and-notes">Current limitations and
+notes</h2>
+<ul>
+<li>Streaming passthrough: The bridge returns the upstream response body
+as a single payload. If upstream provides Server-Sent Events or chunked
+responses, these are not re-streamed by the bridge today.</li>
+<li>Single endpoint focus: Only <code>/v1/chat/completions</code> is
+implemented. Other OpenAI endpoints (e.g., embeddings, images) are not
+exposed.</li>
+<li>Appkey handling: The bridge injects <code>CIRCUIT_APPKEY</code> into
+the <code>user</code> field if absent. If the client provides
+<code>user</code> as a JSON string, the bridge attempts to merge
+<code>appkey</code>; malformed <code>user</code> values are passed
+through unchanged.</li>
+<li>Token cache scope: In dual mode or multi-replica deployments, caches
+are per-process and not shared.</li>
+<li>Quota persistence: Usage is stored in a local SQLite file; in
+multi-instance deployments, use a shared database or external store for
+consistent enforcement.</li>
+</ul>
+<h2
+id="refactor-notes-future-improvements-no-behavior-changes-in-this-pass">Refactor
+notes / future improvements (no behavior changes in this pass)</h2>
+<ul>
+<li><strong>Streaming</strong>: Implement true SSE/chunked passthrough
+when <code>stream=true</code> instead of returning a buffered body.</li>
+<li><strong>Quota semantics</strong>: Add time windows (daily/monthly),
+shared backing store (Redis/Postgres), and optional preflight token
+limits.</li>
+<li><strong>Authn/z</strong>: Consider separating “subkey identity” from
+client <code>Authorization</code> to avoid confusion with upstream auth
+conventions.</li>
+<li><strong>Observability</strong>: Add request IDs and structured JSON
+logs; consider metrics for quota usage and upstream latency.</li>
+<li><strong>Config</strong>: Validate required env vars on startup;
+support <code>.env</code> loading explicitly (currently dependency
+exists but not wired).</li>
+<li><strong>API Structure Rewriting</strong>: Extend the bridge to
+support rewriting between other API formats beyond OpenAI↔︎Circuit:
+<ul>
+<li>Support for translating between different LLM provider APIs
+(Anthropic, Cohere, etc.)</li>
+<li>Configurable transformation rules for request/response formats</li>
+<li>Plugin architecture for custom API adapters</li>
+<li>Multi-backend routing based on model name or other criteria</li>
+<li>Unified request format that can target multiple backends</li>
+</ul></li>
+</ul>
+<h2 id="file-map-key-sources">File map (key sources)</h2>
+<ul>
+<li><code>oai_to_circuit/server.py</code>: Server startup and CLI
+handling.</li>
+<li><code>oai_to_circuit/app.py</code>: FastAPI app factory, endpoints,
+request proxying, Splunk HEC integration.</li>
+<li><code>oai_to_circuit/oauth.py</code>: OAuth2 token acquisition and
+caching.</li>
+<li><code>oai_to_circuit/quota.py</code>: Per-subkey quota enforcement
+and usage tracking.</li>
+<li><code>oai_to_circuit/config.py</code>: Configuration
+management.</li>
+<li><code>oai_to_circuit/logging_config.py</code>: Logging
+configuration.</li>
+<li><code>oai_to_circuit/splunk_hec.py</code>: Splunk HTTP Event
+Collector client.</li>
+<li><code>rewriter.py</code>: Main entry point (thin wrapper).</li>
+<li><code>generate_cert.py</code>: RSA 2048 + SHA-256 self-signed
+certificate generator for development.</li>
+<li><code>examples.py</code>, <code>python_openai_demo.py</code>: Usage
+examples (curl, OpenAI SDK).</li>
+<li><code>tests/</code>: Comprehensive unit test suite (run with
+<code>pytest</code>).</li>
+<li><code>debug_invalid_http.py</code>: Diagnostics for “Invalid HTTP
+request received” scenarios.</li>
+<li><code>oai-to-circuit.service</code>: Systemd unit file for
+production deployment.</li>
+<li><code>INSTALLATION.md</code>: Complete installation and deployment
+guide.</li>
+</ul>
+<h2 id="frequently-used-urls">Frequently used URLs</h2>
+<ul>
+<li>OAuth2 Token Endpoint:
+<code>https://id.cisco.com/oauth2/default/v1/token</code></li>
+<li>Circuit Base: <code>https://chat-ai.cisco.com</code></li>
+<li>Forwarded Path Template:
+<code>/openai/deployments/{model}/chat/completions?api-version=2025-04-01-preview</code></li>
+</ul>
+
+</body>
+</html>

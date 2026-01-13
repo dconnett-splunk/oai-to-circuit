@@ -55,6 +55,80 @@ flowchart LR
     App -->|6. Return| Client
 ```
 
+### Sequence Diagram
+
+The following sequence diagram shows the detailed timing and interaction flow for a typical request:
+
+```mermaid
+sequenceDiagram
+    actor Client
+    participant Bridge as Bridge API<br/>(FastAPI)
+    participant SubkeyExtractor as Subkey<br/>Extractor
+    participant QuotaMgr as Quota<br/>Manager
+    participant QuotaDB as SQLite<br/>Database
+    participant OAuth as OAuth<br/>Token Cache
+    participant IdP as Cisco IdP
+    participant SplunkHEC as Splunk<br/>HEC
+    participant Circuit as Circuit API
+
+    Client->>Bridge: POST /v1/chat/completions<br/>(OpenAI format + subkey)
+    
+    Bridge->>SubkeyExtractor: extract_subkey(headers)
+    SubkeyExtractor-->>Bridge: subkey or error
+    
+    alt No subkey provided
+        Bridge-->>Client: 401 Unauthorized
+    end
+    
+    Bridge->>QuotaMgr: check_quota(subkey, model)
+    QuotaMgr->>QuotaDB: SELECT usage WHERE subkey=? AND model=?
+    QuotaDB-->>QuotaMgr: current usage
+    
+    alt Quota exceeded
+        QuotaMgr-->>Bridge: quota_exceeded=True
+        Bridge->>SplunkHEC: send_error_event(quota_exceeded)
+        Bridge-->>Client: 429 Too Many Requests
+    else Quota OK
+        QuotaMgr-->>Bridge: quota_exceeded=False
+        
+        Bridge->>OAuth: get_access_token()
+        
+        alt Token cached and valid
+            OAuth-->>Bridge: cached_token
+        else Token expired or missing
+            OAuth->>IdP: POST /oauth2/token<br/>(client_credentials)
+            IdP-->>OAuth: access_token + expires_in
+            OAuth-->>Bridge: new_token
+        end
+        
+        Bridge->>Bridge: Transform request<br/>(OpenAI → Circuit format)
+        Note over Bridge: Inject APPKEY<br/>Rewrite URL<br/>Set api-key header
+        
+        Bridge->>Circuit: POST /openai/deployments/{model}/...<br/>(Circuit format + OAuth token)
+        Circuit-->>Bridge: Response + usage tokens
+        
+        Bridge->>QuotaMgr: record_usage(subkey, model, tokens)
+        QuotaMgr->>QuotaDB: UPDATE usage SET requests+=1, tokens+=N
+        
+        Bridge->>QuotaMgr: get_friendly_name(subkey)
+        QuotaMgr->>QuotaDB: SELECT friendly_name, email<br/>FROM subkey_names
+        QuotaDB-->>QuotaMgr: friendly_name, email
+        QuotaMgr-->>Bridge: name and email
+        
+        Bridge->>SplunkHEC: send_usage_event()<br/>(tokens, cost, friendly_name)
+        
+        Bridge-->>Client: Response (OpenAI format)
+    end
+```
+
+**Key Interactions:**
+
+1. **Subkey Authentication**: Extracted from headers before any processing
+2. **Quota Check**: Happens before calling Circuit API to prevent wasted quota
+3. **OAuth Caching**: Token is reused if valid (< 60s from expiry)
+4. **Parallel Recording**: Usage is recorded to both database and Splunk
+5. **Friendly Names**: Looked up after successful request for logging
+
 ### Request Flow
 
 1. **Client Request**: Client sends OpenAI-format request to `/v1/chat/completions` (HTTP or HTTPS)
