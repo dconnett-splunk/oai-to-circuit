@@ -91,6 +91,7 @@ Day-to-day operations and management:
 | Document | Description |
 |----------|-------------|
 | **[Subkey Management](operations/subkey-management.md)** | Complete subkey guide (merged from 4 docs) |
+| **[Key Rotation](operations/key-rotation.md)** | Secure key rotation and lifecycle management |
 | **[Diagnostic Logging](operations/diagnostic-logging.md)** | Troubleshooting with logs |
 | **[Database Queries](operations/database-queries.md)** | Useful SQL queries |
 | **[Dashboard Features](operations/dashboard-features.md)** | Splunk dashboard features |
@@ -107,6 +108,17 @@ The **[Subkey Management Guide](operations/subkey-management.md)** is a comprehe
 - Revoking access
 - Security best practices
 - Troubleshooting
+
+### Key Rotation
+
+The **[Key Rotation Guide](operations/key-rotation.md)** covers secure key lifecycle management:
+
+- Revoking compromised keys
+- Regular key rotation policies
+- Preserving historical data
+- Reporting continuity across rotations
+- Audit trail and compliance
+- **[Quick Start](operations/key-rotation-quickstart.md)** - TL;DR version
 
 ---
 
@@ -191,8 +203,9 @@ Quick links to common tasks:
 
 1. **[Production setup](getting-started/production-setup.md)** - production best practices
 2. **[Manage subkeys](operations/subkey-management.md)** - full lifecycle
-3. **[Database queries](operations/database-queries.md)** - useful queries
-4. **[True-up data](guides/trueup-guide.md)** - reconcile usage
+3. **[Rotate keys](operations/key-rotation.md)** - secure key rotation
+4. **[Database queries](operations/database-queries.md)** - useful queries
+5. **[True-up data](guides/trueup-guide.md)** - reconcile usage
 
 ---
 

@@ -54,6 +54,35 @@ class QuotaManager:
                 ON subkey_names(friendly_name)
                 """
             )
+            # Create key_lifecycle table for key rotation tracking
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS key_lifecycle (
+                    subkey TEXT PRIMARY KEY,
+                    user_id TEXT,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    revoked_at TIMESTAMP,
+                    revoke_reason TEXT,
+                    replaced_by TEXT,
+                    replaces TEXT,
+                    FOREIGN KEY (replaced_by) REFERENCES key_lifecycle(subkey),
+                    FOREIGN KEY (replaces) REFERENCES key_lifecycle(subkey)
+                )
+                """
+            )
+            # Create indexes for key_lifecycle
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_lifecycle_user_id 
+                ON key_lifecycle(user_id)
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_lifecycle_status 
+                ON key_lifecycle(status)
+                """
+            )
             conn.commit()
 
     @contextmanager
@@ -100,17 +129,16 @@ class QuotaManager:
 
     def is_subkey_authorized(self, subkey: str) -> bool:
         """
-        Check if a subkey is authorized (exists in quotas config or database).
+        Check if a subkey is authorized and active (not revoked).
         
         Args:
             subkey: The subkey to check
             
         Returns:
-            True if the subkey is authorized, False otherwise
+            True if the subkey is authorized AND active, False otherwise
         """
         # Check if subkey is in quotas configuration
-        if subkey in self.quotas:
-            return True
+        in_quotas = subkey in self.quotas
         
         # Check if subkey exists in the database
         with self._connect() as conn:
@@ -119,7 +147,29 @@ class QuotaManager:
                 (subkey,),
             )
             count = cur.fetchone()[0]
-            return count > 0
+            in_database = count > 0
+            
+            # If not in quotas or database, reject
+            if not (in_quotas or in_database):
+                return False
+            
+            # Check lifecycle status if table exists
+            try:
+                cur = conn.execute(
+                    "SELECT status FROM key_lifecycle WHERE subkey=?",
+                    (subkey,)
+                )
+                row = cur.fetchone()
+                if row:
+                    # If lifecycle record exists, check status
+                    status = row[0]
+                    if status != 'active':
+                        return False  # Key is revoked or replaced
+            except sqlite3.OperationalError:
+                # key_lifecycle table doesn't exist yet, allow the request
+                pass
+            
+            return True
     
     def get_friendly_name(self, subkey: str) -> Optional[str]:
         """

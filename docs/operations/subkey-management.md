@@ -544,9 +544,13 @@ index=main sourcetype=llm:usage
 
 ## Revoking Access
 
-To revoke a subkey:
+> **⚠️ Important:** For secure key rotation with historical data preservation, see the **[Key Rotation Guide](key-rotation.md)**.
 
-### Step 1: Blacklist in quotas.json
+### Simple Revocation (Manual)
+
+To manually revoke a subkey without rotation:
+
+#### Step 1: Blacklist in quotas.json
 
 ```json
 {
@@ -556,17 +560,39 @@ To revoke a subkey:
 }
 ```
 
-### Step 2: Restart the Bridge
+#### Step 2: Restart the Bridge
 
 ```bash
 sudo systemctl restart oai-to-circuit
 ```
 
-### Step 3: Verify
+#### Step 3: Verify
 
 User will receive: `HTTP 429 Quota exceeded`
 
 **Note:** You can keep the name mapping for historical reports even after revoking access. The mapping will remain in `subkey_names` even after the key is removed from `quotas.json`.
+
+### Secure Key Rotation (Recommended)
+
+For production environments, use the **[Key Rotation Tool](key-rotation.md)** which provides:
+
+- ✅ Immediate revocation with lifecycle tracking
+- ✅ Historical data preservation
+- ✅ Automatic replacement key generation
+- ✅ Full audit trail with reasons
+- ✅ Reporting continuity across rotations
+
+**Quick examples:**
+
+```bash
+# Revoke a compromised key
+python3 rotate_key.py --revoke KEY --reason "Key compromised"
+
+# Rotate a key (revoke + generate replacement)
+python3 rotate_key.py --rotate KEY --prefix fie_alice --reason "Regular rotation"
+```
+
+See the **[Key Rotation Guide](key-rotation.md)** for complete documentation.
 
 ---
 

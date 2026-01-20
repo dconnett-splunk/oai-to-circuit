@@ -22,6 +22,7 @@ A minimal local webserver that translates standard OpenAI-style requests into Ci
 - 🚢 **[Deployment Guide](docs/deployment/deployment-guide.md)** - Deploy updates and manage releases
 - 🏗️ **[Architecture Overview](docs/architecture/architecture.md)** - How the system works
 - 🔑 **[Subkey Management](docs/operations/subkey-management.md)** - Manage API keys and quotas
+- 🔄 **[Key Rotation](docs/operations/key-rotation.md)** - Secure key rotation and lifecycle
 - 📊 **[Operations Guides](docs/operations/)** - Day-to-day operations
 
 **Production Deployment:** See the [Deployment Guide](docs/deployment/deployment-guide.md) for complete deployment procedures.

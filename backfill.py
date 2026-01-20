@@ -346,3 +346,4 @@ index=oai_circuit sourcetype="llm:usage" earliest="{date_str}T00:00:00" latest="
 if __name__ == "__main__":
     sys.exit(main())
 
+
