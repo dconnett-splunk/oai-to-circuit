@@ -81,10 +81,24 @@ def get_quotas_path() -> str:
 
 def get_db_path() -> str:
     """Find the quota.db file."""
-    db_path = os.getenv('QUOTA_DB_PATH', '/opt/oai-to-circuit/quota.db')
-    if not os.path.exists(db_path):
-        db_path = 'quota.db'
-    return db_path
+    # Try environment variable first
+    db_path = os.getenv('QUOTA_DB_PATH')
+    if db_path and os.path.exists(db_path):
+        return db_path
+    
+    # Try common locations
+    possible_paths = [
+        '/var/lib/oai-to-circuit/quota.db',
+        '/opt/oai-to-circuit/quota.db',
+        'quota.db',
+    ]
+    
+    for path in possible_paths:
+        if os.path.exists(path):
+            return path
+    
+    # Default to /var/lib location (standard for systemd service)
+    return '/var/lib/oai-to-circuit/quota.db'
 
 
 def get_key_info(db_path: str, subkey: str) -> Optional[Dict]:
@@ -147,8 +161,28 @@ def get_key_info(db_path: str, subkey: str) -> Optional[Dict]:
 
 def ensure_lifecycle_table(db_path: str):
     """Create key_lifecycle table if it doesn't exist."""
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
+    # Ensure directory exists
+    db_dir = os.path.dirname(db_path)
+    if db_dir and not os.path.exists(db_dir):
+        try:
+            os.makedirs(db_dir, mode=0o755, exist_ok=True)
+        except PermissionError:
+            print(f"\n✗ ERROR: Cannot create directory {db_dir}")
+            print(f"  Run with appropriate permissions or as root")
+            raise
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+    except sqlite3.OperationalError as e:
+        print(f"\n✗ ERROR: Cannot open database: {db_path}")
+        print(f"  Error: {e}")
+        print(f"\n  Possible solutions:")
+        print(f"  1. Check file permissions: ls -l {db_path}")
+        print(f"  2. Check directory permissions: ls -ld {db_dir}")
+        print(f"  3. Run as appropriate user: sudo -u oai-bridge ...")
+        print(f"  4. Set QUOTA_DB_PATH environment variable")
+        raise
     
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS key_lifecycle (
