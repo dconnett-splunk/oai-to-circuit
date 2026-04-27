@@ -3,7 +3,8 @@ import json
 import sqlite3
 import threading
 from contextlib import contextmanager
-from typing import Optional, Dict, Tuple
+from datetime import datetime, timezone
+from typing import Any, Optional, Dict, Tuple
 
 
 class QuotaManager:
@@ -13,7 +14,7 @@ class QuotaManager:
     - Quotas: provided via in-memory dict (loaded from env/file by caller)
     """
 
-    def __init__(self, db_path: str, quotas: Dict[str, Dict[str, Dict[str, int]]]):
+    def __init__(self, db_path: str, quotas: Dict[str, Dict[str, Dict[str, Any]]]):
         self.db_path = db_path
         self.quotas = quotas or {}
         self._init_db()
@@ -31,6 +32,20 @@ class QuotaManager:
                     completion_tokens INTEGER NOT NULL DEFAULT 0,
                     total_tokens INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY (subkey, model)
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS monthly_usage (
+                    subkey TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    usage_month TEXT NOT NULL,
+                    requests INTEGER NOT NULL DEFAULT 0,
+                    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                    completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (subkey, model, usage_month)
                 )
                 """
             )
@@ -93,10 +108,10 @@ class QuotaManager:
         finally:
             conn.close()
 
-    def _get_limits(self, subkey: str, model: str) -> Dict[str, Optional[int]]:
+    def _get_limits(self, subkey: str, model: str) -> Dict[str, Any]:
         model_limits = (self.quotas.get(subkey) or {}).get(model) or {}
         wildcard_limits = (self.quotas.get(subkey) or {}).get("*") or {}
-        combined: Dict[str, Optional[int]] = dict(wildcard_limits)
+        combined: Dict[str, Any] = dict(wildcard_limits)
         combined.update(model_limits)
         return combined
 
@@ -110,6 +125,29 @@ class QuotaManager:
             if not row:
                 return 0, 0, 0, 0
             return int(row[0]), int(row[1]), int(row[2]), int(row[3])
+
+    def get_monthly_usage(self, subkey: str, model: str, usage_month: str) -> Tuple[int, int, int, int]:
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                SELECT requests, prompt_tokens, completion_tokens, total_tokens
+                FROM monthly_usage
+                WHERE subkey=? AND model=? AND usage_month=?
+                """,
+                (subkey, model, usage_month),
+            )
+            row = cur.fetchone()
+            if not row:
+                return 0, 0, 0, 0
+            return int(row[0]), int(row[1]), int(row[2]), int(row[3])
+
+    def get_pricing_tier(self, subkey: str, model: str) -> str:
+        tier = self._get_limits(subkey, model).get("pricing_tier")
+        if isinstance(tier, str):
+            tier = tier.lower()
+            if tier in {"auto", "free", "payg"}:
+                return tier
+        return "auto"
 
     def is_request_allowed(self, subkey: str, model: str) -> bool:
         limits = self._get_limits(subkey, model)
@@ -219,7 +257,9 @@ class QuotaManager:
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
         total_tokens: int = 0,
+        usage_month: Optional[str] = None,
     ) -> None:
+        usage_month = usage_month or datetime.now(timezone.utc).strftime("%Y-%m")
         with self._lock:
             with self._connect() as conn:
                 conn.execute(
@@ -241,10 +281,30 @@ class QuotaManager:
                         max(0, total_tokens),
                     ),
                 )
+                conn.execute(
+                    """
+                    INSERT INTO monthly_usage (subkey, model, usage_month, requests, prompt_tokens, completion_tokens, total_tokens)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(subkey, model, usage_month) DO UPDATE SET
+                        requests = requests + excluded.requests,
+                        prompt_tokens = prompt_tokens + excluded.prompt_tokens,
+                        completion_tokens = completion_tokens + excluded.completion_tokens,
+                        total_tokens = total_tokens + excluded.total_tokens
+                    """,
+                    (
+                        subkey,
+                        model,
+                        usage_month,
+                        max(0, request_inc),
+                        max(0, prompt_tokens),
+                        max(0, completion_tokens),
+                        max(0, total_tokens),
+                    ),
+                )
                 conn.commit()
 
 
-def load_quotas_from_env_or_file() -> Dict[str, Dict[str, Dict[str, int]]]:
+def load_quotas_from_env_or_file() -> Dict[str, Dict[str, Dict[str, Any]]]:
     quotas_str = os.environ.get("QUOTAS_JSON", "").strip()
     if quotas_str:
         try:
@@ -260,5 +320,4 @@ def load_quotas_from_env_or_file() -> Dict[str, Dict[str, Dict[str, int]]]:
         except Exception:
             return {}
     return {}
-
 

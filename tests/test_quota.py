@@ -72,3 +72,44 @@ def test_per_model_quotas_override_wildcard():
         assert qm.is_request_allowed("user1", "gpt-4o-mini") is True
 
 
+def test_monthly_usage_is_tracked_separately_by_billing_month():
+    quotas = {"tester": {"gpt-5-nano": {"requests": 10}}}
+
+    with tempfile.NamedTemporaryFile() as tf:
+        qm = QuotaManager(db_path=tf.name, quotas=quotas)
+        qm.record_usage(
+            "tester",
+            "gpt-5-nano",
+            request_inc=1,
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+            usage_month="2026-04",
+        )
+        qm.record_usage(
+            "tester",
+            "gpt-5-nano",
+            request_inc=2,
+            prompt_tokens=4,
+            completion_tokens=1,
+            total_tokens=5,
+            usage_month="2026-05",
+        )
+
+        assert qm.get_monthly_usage("tester", "gpt-5-nano", "2026-04") == (1, 10, 5, 15)
+        assert qm.get_monthly_usage("tester", "gpt-5-nano", "2026-05") == (2, 4, 1, 5)
+
+
+def test_pricing_tier_can_be_overridden_from_quota_config():
+    quotas = {
+        "tester": {
+            "*": {"pricing_tier": "auto"},
+            "gpt-5-nano": {"requests": 10, "pricing_tier": "payg"},
+        }
+    }
+
+    with tempfile.NamedTemporaryFile() as tf:
+        qm = QuotaManager(db_path=tf.name, quotas=quotas)
+        assert qm.get_pricing_tier("tester", "gpt-5-nano") == "payg"
+        assert qm.get_pricing_tier("tester", "gpt-4o-mini") == "auto"
+

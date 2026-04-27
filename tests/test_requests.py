@@ -54,6 +54,7 @@ def _make_test_config(*, quota_db_path: str, require_subkey: bool, circuit_appke
         splunk_source="oai-to-circuit",
         splunk_sourcetype="llm:usage",
         splunk_index="main",
+        splunk_verify_ssl=True,
     )
 
 def test_health_check_flags(tmp_path: Path):
@@ -200,3 +201,73 @@ def test_chat_completion_user_field_invalid_json_does_not_crash(tmp_path: Path, 
             },
         )
         assert r.status_code == 200
+
+
+def test_chat_completion_emits_free_tier_billing_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from oai_to_circuit import app as app_mod
+
+    sent_events: list[dict] = []
+
+    async def _tok(**kwargs) -> str:
+        return "token"
+
+    def _send_usage_event(
+        self,
+        subkey: str,
+        model: str,
+        requests: int = 1,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        total_tokens: int = 0,
+        additional_fields=None,
+        preserve_timestamp: bool = False,
+        friendly_name=None,
+        email=None,
+    ) -> bool:
+        sent_events.append(
+            {
+                "subkey": subkey,
+                "model": model,
+                "requests": requests,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "additional_fields": additional_fields or {},
+                "friendly_name": friendly_name,
+                "email": email,
+            }
+        )
+        return True
+
+    monkeypatch.setattr(app_mod, "get_access_token", _tok)
+    monkeypatch.setattr(app_mod.httpx, "AsyncClient", _FakeCircuitAsyncClient)
+    monkeypatch.setattr(
+        app_mod,
+        "load_quotas_from_env_or_file",
+        lambda: {"sk": {"gpt-5-nano": {"requests": 10}}},
+    )
+    monkeypatch.setattr(app_mod.SplunkHEC, "send_usage_event", _send_usage_event)
+
+    app = create_app(config=_make_test_config(quota_db_path=str(tmp_path / "q.db"), require_subkey=False))
+    with TestClient(app) as client:
+        r = client.post(
+            "/v1/chat/completions",
+            headers={"X-Bridge-Subkey": "sk"},
+            json={"model": "gpt-5-nano", "messages": [{"role": "user", "content": "hi"}]},
+        )
+        assert r.status_code == 200
+
+    assert len(sent_events) == 1
+    event = sent_events[0]
+    fields = event["additional_fields"]
+    assert event["model"] == "gpt-5-nano"
+    assert fields["pricing_tier"] == "free"
+    assert fields["pricing_tier_mode"] == "auto"
+    assert fields["free_tier_eligible"] is True
+    assert fields["estimated_cost_usd"] == pytest.approx(0.0)
+    assert fields["estimated_payg_cost_usd"] > 0
+    assert fields["free_prompt_tokens_applied"] == 2
+    assert fields["free_completion_tokens_applied"] == 3
+    assert fields["billable_prompt_tokens"] == 0
+    assert fields["billable_completion_tokens"] == 0
+    assert fields["billing_period_month"]

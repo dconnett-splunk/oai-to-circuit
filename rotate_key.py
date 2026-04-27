@@ -255,8 +255,26 @@ def revoke_key(db_path: str, quotas_path: str, subkey: str, reason: str, replace
     conn.close()
     
     # Remove from quotas.json (or set to zero)
-    with open(quotas_path, 'r') as f:
-        quotas = json.load(f)
+    try:
+        with open(quotas_path, 'r') as f:
+            content = f.read()
+            if not content.strip():
+                print(f"✗ ERROR: {quotas_path} is empty")
+                return False
+            quotas = json.loads(content)
+    except PermissionError:
+        print(f"✗ ERROR: Permission denied reading {quotas_path}")
+        print(f"  Run with sudo or as root")
+        return False
+    except json.JSONDecodeError as e:
+        print(f"✗ ERROR: Invalid JSON in {quotas_path}")
+        print(f"  Error: {e}")
+        print(f"  Check the file syntax")
+        return False
+    except Exception as e:
+        print(f"✗ ERROR: Cannot read {quotas_path}")
+        print(f"  Error: {e}")
+        return False
     
     if subkey in quotas:
         # Set all quotas to 0 instead of deleting (preserves structure)
@@ -269,8 +287,14 @@ def revoke_key(db_path: str, quotas_path: str, subkey: str, reason: str, replace
             "reason": reason,
         }
         
-        with open(quotas_path, 'w') as f:
-            json.dump(quotas, f, indent=2)
+        try:
+            with open(quotas_path, 'w') as f:
+                json.dump(quotas, f, indent=2)
+        except PermissionError:
+            print(f"✗ ERROR: Permission denied writing to {quotas_path}")
+            print(f"  The key was revoked in database but quotas.json could not be updated")
+            print(f"  You may need to manually edit the file as root")
+            return False
         
         print(f"✓ Set quotas to 0 for revoked key in {quotas_path}")
     
@@ -480,19 +504,48 @@ Examples:
         activate_key(db_path, new_key, replaces=old_key)
         
         # Add to quotas.json with same quotas as old key
+        # We need to restore the quotas BEFORE they were zeroed
+        # So we look for the _REVOKED_ comment to get original quotas
         with open(quotas_path, 'r') as f:
             quotas = json.load(f)
         
-        # Copy quotas from old key (before they were zeroed)
-        # Note: This requires the quotas.json to still have the old config
-        # In production, you might want to store the original quotas separately
+        # Try to find original quotas from the revoked key metadata
+        revoked_key = f"_REVOKED_{old_key}"
+        original_quotas = None
+        
+        # Check if we have a backup or can reconstruct from common defaults
+        if old_key in quotas and any(v.get('requests', 0) > 0 for v in quotas[old_key].values()):
+            # Old key still has non-zero quotas (shouldn't happen but handle it)
+            original_quotas = quotas[old_key].copy()
+        else:
+            # Use reasonable defaults based on prefix
+            print(f"\n⚠️  Could not find original quotas for {old_key}")
+            print(f"   Using default quotas. You may need to adjust in quotas.json")
+            original_quotas = {
+                "gpt-4o": {"requests": 100, "total_tokens": 50000},
+                "gpt-4o-mini": {"requests": 1000, "total_tokens": 1000000},
+                "*": {"requests": 100}
+            }
+        
+        # Add new key with original quotas
+        quotas[new_key] = original_quotas
+        
+        try:
+            with open(quotas_path, 'w') as f:
+                json.dump(quotas, f, indent=2)
+            print(f"\n✓ Added {new_key} to quotas.json")
+        except PermissionError:
+            print(f"\n✗ ERROR: Permission denied writing to {quotas_path}")
+            print(f"  The key was created in database but not added to quotas.json")
+            print(f"  Manually add it with sudo")
+            return 1
         
         print(f"\n✓ Key rotation complete!")
-        print(f"\n⚠️  IMPORTANT: Update your quotas.json to add the new key:")
-        print(f"  {new_key}: {{ ... copy quotas from old key ... }}")
-        print(f"\n⚠️  Distribute the new key to the user:")
+        print(f"\n⚠️  IMPORTANT: Distribute the new key to the user:")
         print(f"  New Key: {new_key}")
         print(f"\n✓ Old key revoked and historical data preserved")
+        print(f"\n  Restart the service to pick up quota changes:")
+        print(f"  sudo systemctl restart oai-to-circuit")
         
         return 0
     

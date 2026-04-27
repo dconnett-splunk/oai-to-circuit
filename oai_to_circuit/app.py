@@ -1,7 +1,8 @@
 import json
 import logging
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional, AsyncIterator, Tuple, Tuple
+from datetime import datetime, timezone
+from typing import Any, AsyncIterator, Dict, Optional, Tuple
 
 import httpx
 from fastapi import FastAPI, Request, Response, HTTPException
@@ -10,8 +11,8 @@ from fastapi.responses import StreamingResponse
 from oai_to_circuit.config import BridgeConfig
 from oai_to_circuit.oauth import TokenCache, get_access_token
 from oai_to_circuit.quota import QuotaManager, load_quotas_from_env_or_file
+from oai_to_circuit.pricing import estimate_billing
 from oai_to_circuit.splunk_hec import SplunkHEC
-from oai_to_circuit.pricing import calculate_cost
 
 
 def extract_subkey(request: Request) -> Optional[str]:
@@ -85,6 +86,40 @@ async def parse_sse_stream(
     if usage_data:
         logger.info(f"[SSE PARSER] Final usage extracted from stream: {usage_data}")
         yield (b"", usage_data)
+
+
+def current_billing_month() -> str:
+    """Return the current billing month in UTC."""
+    return datetime.now(timezone.utc).strftime("%Y-%m")
+
+
+def build_billing_context(
+    quota_manager: QuotaManager,
+    subkey: str,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    request_count: int = 1,
+) -> Tuple[str, Dict[str, Any]]:
+    """Build billing metadata for a single usage event."""
+    billing_month = current_billing_month()
+    _, month_prompt_tokens, month_completion_tokens, _ = quota_manager.get_monthly_usage(
+        subkey=subkey,
+        model=model,
+        usage_month=billing_month,
+    )
+    pricing_tier = quota_manager.get_pricing_tier(subkey, model)
+    billing = estimate_billing(
+        model=model,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        request_count=request_count,
+        pricing_tier=pricing_tier,
+        month_prompt_tokens_used=month_prompt_tokens,
+        month_completion_tokens_used=month_completion_tokens,
+    )
+    billing["billing_period_month"] = billing_month
+    return billing_month, billing
 
 
 def create_app(*, config: BridgeConfig) -> FastAPI:
@@ -305,11 +340,21 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                         total_tokens = collected_usage.get("total_tokens", 0)
                         
                         logger.info(f"[STREAMING] Recording usage: prompt={prompt_tokens}, completion={completion_tokens}, total={total_tokens}")
-                        
-                        # Calculate cost
-                        estimated_cost, cost_known = calculate_cost(model, prompt_tokens, completion_tokens)
+                        usage_month, billing = build_billing_context(
+                            quota_manager=quota_manager,
+                            subkey=caller_subkey,
+                            model=model,
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            request_count=1,
+                        )
+                        estimated_cost = float(billing["estimated_cost_usd"])
+                        cost_known = bool(billing["pricing_known"])
                         if cost_known:
-                            logger.debug(f"[COST] Estimated cost for streaming request: ${estimated_cost:.6f}")
+                            logger.debug(
+                                f"[COST] Estimated cost for streaming request: ${estimated_cost:.6f} "
+                                f"(tier={billing['pricing_tier']}, payg=${billing['estimated_payg_cost_usd']:.6f})"
+                            )
                         
                         quota_manager.record_usage(
                             subkey=caller_subkey,
@@ -318,6 +363,7 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                             prompt_tokens=prompt_tokens,
                             completion_tokens=completion_tokens,
                             total_tokens=total_tokens,
+                            usage_month=usage_month,
                         )
                         
                         # Send usage event to Splunk HEC
@@ -332,6 +378,25 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                                 "x_forwarded_for": x_forwarded_for,
                                 "is_streaming": True,
                                 "cost_known": cost_known,
+                                "pricing_model": billing["pricing_model"],
+                                "pricing_tier_mode": billing["pricing_tier_mode"],
+                                "pricing_tier": billing["pricing_tier"],
+                                "free_tier_eligible": billing["free_tier_eligible"],
+                                "billing_period_month": billing["billing_period_month"],
+                                "free_tier_prompt_included": billing["free_tier_prompt_included"],
+                                "free_tier_completion_included": billing["free_tier_completion_included"],
+                                "monthly_prompt_tokens_before_request": billing["monthly_prompt_tokens_before_request"],
+                                "monthly_completion_tokens_before_request": billing["monthly_completion_tokens_before_request"],
+                                "monthly_prompt_tokens_after_request": billing["monthly_prompt_tokens_after_request"],
+                                "monthly_completion_tokens_after_request": billing["monthly_completion_tokens_after_request"],
+                                "free_prompt_tokens_applied": billing["free_prompt_tokens_applied"],
+                                "free_completion_tokens_applied": billing["free_completion_tokens_applied"],
+                                "billable_prompt_tokens": billing["billable_prompt_tokens"],
+                                "billable_completion_tokens": billing["billable_completion_tokens"],
+                                "payg_prompt_rate_per_million": billing["payg_prompt_rate_per_million"],
+                                "payg_completion_rate_per_million": billing["payg_completion_rate_per_million"],
+                                "estimated_payg_cost_usd": billing["estimated_payg_cost_usd"],
+                                "request_surcharge_usd": billing["request_surcharge_usd"],
                             }
                             
                             if cost_known:
@@ -394,9 +459,21 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                         logger.debug(f"[TOKEN EXTRACTION] Response body that failed to parse: {r.text[:500] if r.text else 'empty'}")
                     
                     # Calculate cost
-                    estimated_cost, cost_known = calculate_cost(model, prompt_tokens, completion_tokens)
+                    usage_month, billing = build_billing_context(
+                        quota_manager=quota_manager,
+                        subkey=caller_subkey,
+                        model=model,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        request_count=1,
+                    )
+                    estimated_cost = float(billing["estimated_cost_usd"])
+                    cost_known = bool(billing["pricing_known"])
                     if cost_known:
-                        logger.debug(f"[COST] Estimated cost for non-streaming request: ${estimated_cost:.6f}")
+                        logger.debug(
+                            f"[COST] Estimated cost for non-streaming request: ${estimated_cost:.6f} "
+                            f"(tier={billing['pricing_tier']}, payg=${billing['estimated_payg_cost_usd']:.6f})"
+                        )
                     
                     quota_manager.record_usage(
                         subkey=caller_subkey,
@@ -405,6 +482,7 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
                         total_tokens=total_tokens,
+                        usage_month=usage_month,
                     )
                     
                     # Send usage event to Splunk HEC
@@ -419,6 +497,25 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                             "x_forwarded_for": x_forwarded_for,
                             "is_streaming": False,
                             "cost_known": cost_known,
+                            "pricing_model": billing["pricing_model"],
+                            "pricing_tier_mode": billing["pricing_tier_mode"],
+                            "pricing_tier": billing["pricing_tier"],
+                            "free_tier_eligible": billing["free_tier_eligible"],
+                            "billing_period_month": billing["billing_period_month"],
+                            "free_tier_prompt_included": billing["free_tier_prompt_included"],
+                            "free_tier_completion_included": billing["free_tier_completion_included"],
+                            "monthly_prompt_tokens_before_request": billing["monthly_prompt_tokens_before_request"],
+                            "monthly_completion_tokens_before_request": billing["monthly_completion_tokens_before_request"],
+                            "monthly_prompt_tokens_after_request": billing["monthly_prompt_tokens_after_request"],
+                            "monthly_completion_tokens_after_request": billing["monthly_completion_tokens_after_request"],
+                            "free_prompt_tokens_applied": billing["free_prompt_tokens_applied"],
+                            "free_completion_tokens_applied": billing["free_completion_tokens_applied"],
+                            "billable_prompt_tokens": billing["billable_prompt_tokens"],
+                            "billable_completion_tokens": billing["billable_completion_tokens"],
+                            "payg_prompt_rate_per_million": billing["payg_prompt_rate_per_million"],
+                            "payg_completion_rate_per_million": billing["payg_completion_rate_per_million"],
+                            "estimated_payg_cost_usd": billing["estimated_payg_cost_usd"],
+                            "request_surcharge_usd": billing["request_surcharge_usd"],
                         }
                         
                         if cost_known:
@@ -460,5 +557,3 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
             raise HTTPException(status_code=502, detail=f"Gateway error: {str(e)}")
 
     return app
-
-

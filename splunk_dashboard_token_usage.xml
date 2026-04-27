@@ -1,0 +1,965 @@
+<form version="1.1" theme="light">
+  <label>OAI-to-Circuit Token Usage Dashboard</label>
+  <description>Token usage analytics and predictions for LLM API usage</description>
+  <!-- Base Search: Pricing Calculation -->
+  <search id="base_usage_with_cost">
+    <query>index=oai_circuit sourcetype="llm:usage"
+| eval normalized_model=lower(model)
+| eval normalized_model=case(
+    normalized_model=="gpt-4o mini", "gpt-4o-mini",
+    normalized_model=="gpt-4.1 mini", "gpt-4.1-mini",
+    normalized_model=="gpt-5 mini", "gpt-5-mini",
+    normalized_model=="gpt-5 nano", "gpt-5-nano",
+    normalized_model=="gpt-5 chat", "gpt-5-chat",
+    normalized_model=="gpt-o4-mini" OR normalized_model=="gpt-o4 mini", "o4-mini",
+    normalized_model=="gpt-o3" OR normalized_model=="gpt o3", "o3",
+    normalized_model=="gemini 2.5 pro exp" OR normalized_model=="gemini-2.5-pro-exp", "gemini-2.5-pro",
+    normalized_model=="gemini 2.5 flash preview" OR normalized_model=="gemini-2.5-flash-preview", "gemini-2.5-flash",
+    normalized_model=="gemini 3.1 flash lite", "gemini-3.1-flash-lite",
+    normalized_model=="gemini 3.1 pro", "gemini-3.1-pro",
+    normalized_model=="claude sonnet 4", "claude-sonnet-4",
+    normalized_model=="claude sonnet 4.5" OR normalized_model=="claude-sonnet-4.5", "claude-sonnet-4-5",
+    normalized_model=="claude opus 4.1" OR normalized_model=="claude-opus-4.1", "claude-opus-4-1",
+    normalized_model=="claude opus 4.5" OR normalized_model=="claude-opus-4.5", "claude-opus-4-5",
+    normalized_model=="claude opus 4.6" OR normalized_model=="claude-opus-4.6", "claude-opus-4-6",
+    normalized_model=="claude haiku 4.5" OR normalized_model=="claude-haiku-4.5", "claude-haiku-4-5",
+    1==1, normalized_model)
+| eval input_price_per_million=case(
+    normalized_model=="gpt-4o-mini", 0.165,
+    normalized_model=="gpt-4o", 2.75,
+    normalized_model=="gpt-4.1", 2.00,
+    normalized_model=="gpt-4.1-mini", 0.40,
+    normalized_model=="o4-mini", 1.10,
+    normalized_model=="o3", 2.00,
+    normalized_model=="gpt-5", 1.375,
+    normalized_model=="gpt-5-2", 1.75,
+    normalized_model=="gpt-5-4", 2.50,
+    normalized_model=="gpt-5-4-mini", 0.75,
+    normalized_model=="gpt-5-4-nano", 0.20,
+    normalized_model=="gpt-5-mini", 0.25,
+    normalized_model=="gpt-5-nano", 0.055,
+    normalized_model=="gpt-5-chat", 1.25,
+    normalized_model=="gemini-2.5-pro" AND prompt_tokens > 200000, 2.50,
+    normalized_model=="gemini-2.5-pro", 1.25,
+    normalized_model=="gemini-2.5-flash", 0.30,
+    normalized_model=="gemini-3-flash", 0.50,
+    normalized_model=="gemini-3.1-flash-lite", 0.25,
+    normalized_model=="gemini-3.1-pro" AND prompt_tokens > 200000, 4.00,
+    normalized_model=="gemini-3.1-pro", 2.00,
+    normalized_model=="gemini-2.5-pro-web-search" AND prompt_tokens > 200000, 2.50,
+    normalized_model=="gemini-2.5-pro-web-search", 1.25,
+    normalized_model=="gemini-2.5-flash-web-search", 0.30,
+    normalized_model=="gemini-3-pro-web-search" AND prompt_tokens > 200000, 4.00,
+    normalized_model=="gemini-3-pro-web-search", 2.00,
+    normalized_model=="gemini-3.1-flash-lite-web-search", 0.25,
+    normalized_model=="gemini-3.1-pro-web-search" AND prompt_tokens > 200000, 4.00,
+    normalized_model=="gemini-3.1-pro-web-search", 2.00,
+    normalized_model=="claude-sonnet-4", 6.00,
+    normalized_model=="claude-sonnet-4-5", 6.60,
+    normalized_model=="claude-opus-4-1", 15.00,
+    normalized_model=="claude-opus-4-5", 5.00,
+    normalized_model=="claude-opus-4-6", 5.00,
+    normalized_model=="claude-haiku-4-5", 1.10,
+    1==1, 0)
+| eval completion_price_per_million=case(
+    normalized_model=="gpt-4o-mini", 0.66,
+    normalized_model=="gpt-4o", 11.00,
+    normalized_model=="gpt-4.1", 8.00,
+    normalized_model=="gpt-4.1-mini", 1.60,
+    normalized_model=="o4-mini", 4.40,
+    normalized_model=="o3", 8.00,
+    normalized_model=="gpt-5", 11.00,
+    normalized_model=="gpt-5-2", 14.00,
+    normalized_model=="gpt-5-4", 15.00,
+    normalized_model=="gpt-5-4-mini", 4.15,
+    normalized_model=="gpt-5-4-nano", 1.25,
+    normalized_model=="gpt-5-mini", 2.00,
+    normalized_model=="gpt-5-nano", 0.44,
+    normalized_model=="gpt-5-chat", 10.00,
+    normalized_model=="gemini-2.5-pro" AND prompt_tokens > 200000, 15.00,
+    normalized_model=="gemini-2.5-pro", 10.00,
+    normalized_model=="gemini-2.5-flash", 2.50,
+    normalized_model=="gemini-3-flash", 3.00,
+    normalized_model=="gemini-3.1-flash-lite", 1.50,
+    normalized_model=="gemini-3.1-pro" AND prompt_tokens > 200000, 18.00,
+    normalized_model=="gemini-3.1-pro", 12.00,
+    normalized_model=="gemini-2.5-pro-web-search" AND prompt_tokens > 200000, 15.00,
+    normalized_model=="gemini-2.5-pro-web-search", 10.00,
+    normalized_model=="gemini-2.5-flash-web-search", 2.50,
+    normalized_model=="gemini-3-pro-web-search" AND prompt_tokens > 200000, 18.00,
+    normalized_model=="gemini-3-pro-web-search", 12.00,
+    normalized_model=="gemini-3.1-flash-lite-web-search", 1.50,
+    normalized_model=="gemini-3.1-pro-web-search" AND prompt_tokens > 200000, 18.00,
+    normalized_model=="gemini-3.1-pro-web-search", 12.00,
+    normalized_model=="claude-sonnet-4", 22.50,
+    normalized_model=="claude-sonnet-4-5", 24.75,
+    normalized_model=="claude-opus-4-1", 75.00,
+    normalized_model=="claude-opus-4-5", 25.00,
+    normalized_model=="claude-opus-4-6", 25.00,
+    normalized_model=="claude-haiku-4-5", 5.50,
+    1==1, 0)
+| eval request_surcharge_per_1k=case(
+    normalized_model=="gemini-2.5-pro-web-search", 35.00,
+    normalized_model=="gemini-2.5-flash-web-search", 25.00,
+    normalized_model=="gemini-3-pro-web-search", 14.00,
+    normalized_model=="gemini-3.1-flash-lite-web-search", 14.00,
+    normalized_model=="gemini-3.1-pro-web-search", 14.00,
+    1==1, 0)
+| eval calculated_cost=(prompt_tokens/1000000*input_price_per_million)+(completion_tokens/1000000*completion_price_per_million)+((coalesce(requests, 1))/1000*request_surcharge_per_1k)
+| eval cost=coalesce(estimated_cost_usd, calculated_cost)</query>
+    <earliest>$time_picker.earliest$</earliest>
+    <latest>$time_picker.latest$</latest>
+  </search>
+  <!-- Row 1: Summary Statistics -->
+  <!-- Row 2: Token Usage Over Time with Prediction -->
+  <!-- Row 3: Token Breakdown -->
+  <!-- Row 4: Usage by Model and Requests Over Time -->
+  <!-- Row 5: Top Users and Model Distribution -->
+  <!-- Row 6: Hourly and Daily Patterns -->
+  <!-- Row 7: Success Rate and Errors -->
+  <!-- Row 8: Detailed Recent Events -->
+  <!-- Row 9: User Summary with Names -->
+  <!-- Row 10: Cost Tracking -->
+  <!-- Row 11: Streaming vs Non-Streaming Analysis -->
+  <!-- Row 12: Cost Projections -->
+  <!-- Row 13: Rate Limit Monitoring (if available) -->
+  <fieldset submitButton="false">
+    <input type="time" token="time_picker">
+      <label>Time Range</label>
+      <default>
+        <earliest>-24h@h</earliest>
+        <latest>now</latest>
+      </default>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <title>Total Tokens (Selected Period)</title>
+      <single>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| stats sum(total_tokens) as total_tokens
+| eval total_tokens=tostring(total_tokens, "commas")</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="numberPrecision">0</option>
+        <option name="underLabel">Total Tokens</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Total Estimated Cost (USD)</title>
+      <single>
+        <search base="base_usage_with_cost">
+          <query>| stats sum(cost) as total_cost
+| eval total_cost="$" + tostring(round(total_cost, 2), "commas")</query>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="underLabel">Estimated API Costs</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Total Requests</title>
+      <single>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| stats sum(requests) as requests
+| eval requests=tostring(requests, "commas")</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="numberPrecision">0</option>
+        <option name="underLabel">API Requests</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Avg Tokens per Request</title>
+      <single>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| stats sum(total_tokens) as total_tokens count as num_requests
+| eval avg_tokens=round(total_tokens/num_requests, 0)
+| fields avg_tokens</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="numberPrecision">0</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="underLabel">Avg Tokens/Request</option>
+      </single>
+    </panel>
+    <panel>
+      <title>Unique Users</title>
+      <single>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| eval normalized_subkey=if(match(subkey, "^sha256:"), subkey, "sha256:" + substr(sha256(subkey), 1, 16))
+| eval grouping_key=coalesce(email, normalized_subkey)
+| stats dc(grouping_key) as unique_users</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="numberPrecision">0</option>
+        <option name="underLabel">Unique Users</option>
+      </single>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Token Usage by Model</title>
+      <table>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| stats sum(total_tokens) as "Total Tokens" sum(prompt_tokens) as "Prompt Tokens" sum(completion_tokens) as "Completion Tokens" by model
+| rename model as "Model"
+| table "Model" "Total Tokens" "Prompt Tokens" "Completion Tokens"
+| sort - "Total Tokens"</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">20</option>
+        <option name="wrap">true</option>
+        <format type="number" field="Total Tokens">
+          <option name="precision">0</option>
+          <option name="useThousandSeparators">true</option>
+        </format>
+        <format type="number" field="Prompt Tokens">
+          <option name="precision">0</option>
+          <option name="useThousandSeparators">true</option>
+        </format>
+        <format type="number" field="Completion Tokens">
+          <option name="precision">0</option>
+          <option name="useThousandSeparators">true</option>
+        </format>
+      </table>
+    </panel>
+    <panel>
+      <title>User Summary (With Friendly Names)</title>
+      <table>
+          <search>
+            <query>index=oai_circuit sourcetype="llm:usage"
+| eval normalized_subkey=if(match(subkey, "^sha256:"), subkey, "sha256:" + substr(sha256(subkey), 1, 16))
+| eval grouping_key=coalesce(email, normalized_subkey)
+| stats sum(total_tokens) as total_tokens_raw sum(requests) as requests_raw dc(model) as model_count dc(normalized_subkey) as key_count values(friendly_name) as friendly_name values(email) as email by grouping_key
+| eval has_name=if(isnotnull(friendly_name), "Yes", "No")
+| eval display_name=case(
+    isnotnull(friendly_name) AND isnotnull(email), friendly_name + " &lt;" + email + "&gt;",
+    isnotnull(friendly_name), friendly_name,
+    isnotnull(email), email,
+    match(grouping_key, "^sha256:"), "User-" + substr(grouping_key, 8, 16),
+    1==1, grouping_key
+)
+| eval "Avg Tokens/Req"=round(total_tokens_raw/requests_raw, 2)
+| eval "Requests"=tostring(requests_raw, "commas")
+| eval "Keys"=key_count
+| sort - total_tokens_raw
+| rename display_name as "User" has_name as "Has Name" model_count as "Models Used" total_tokens_raw as "Total Tokens"
+| fieldformat "Total Tokens"=tostring('Total Tokens', "commas")
+| table "User" "Total Tokens" "Requests" "Models Used" "Keys" "Avg Tokens/Req" "Has Name"
+| head 20</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="count">20</option>
+        <option name="drilldown">none</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Cumulative Prompt vs Completion Tokens with Forecast</title>
+      <chart>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| timechart span=1h sum(prompt_tokens) as prompt_tokens sum(completion_tokens) as completion_tokens
+| accum prompt_tokens as "Cumulative Prompt"
+| accum completion_tokens as "Cumulative Completion"
+| predict "Cumulative Prompt" as pred_prompt future_timespan=6 algorithm=LLT suppress=true
+| predict "Cumulative Completion" as pred_completion future_timespan=6 algorithm=LLT suppress=true</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Cumulative Tokens</option>
+        <option name="charting.chart">area</option>
+        <option name="charting.chart.nullValueMode">connect</option>
+        <option name="charting.chart.stackMode">default</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Cumulative Token Usage with Forecast</title>
+      <chart>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| timechart span=1h sum(total_tokens) as hourly_tokens
+| accum hourly_tokens as "Cumulative Tokens"
+| predict "Cumulative Tokens" future_timespan=2 algorithm=LLT suppress=true</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Cumulative Total Tokens</option>
+        <option name="charting.chart">area</option>
+        <option name="charting.chart.nullValueMode">connect</option>
+        <option name="charting.chart.showDataLabels">none</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Hourly Token Usage with Forecast</title>
+      <chart>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| timechart span=1h sum(total_tokens) as tokens
+| predict tokens future_timespan=6 algorithm=LL suppress=true</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Tokens per Hour</option>
+        <option name="charting.legend.placement">bottom</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Hourly Request Rate with Forecast</title>
+      <chart>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| timechart span=1h count as requests
+| predict requests future_timespan=6 algorithm=LL suppress=true</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Requests per Hour</option>
+        <option name="charting.legend.placement">bottom</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Cumulative Token Usage with Forecast (Alt View)</title>
+      <chart>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| timechart span=1h sum(total_tokens) as tokens
+| accum tokens as "Cumulative Tokens"
+| predict "Cumulative Tokens" future_timespan=6 algorithm=LL suppress=true</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="charting.chart">area</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Cumulative Total Tokens</option>
+        <option name="charting.legend.placement">bottom</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Top 10 Users by Token Usage</title>
+      <table>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| eval normalized_subkey=if(match(subkey, "^sha256:"), subkey, "sha256:" + substr(sha256(subkey), 1, 16))
+| eval grouping_key=coalesce(email, normalized_subkey)
+| stats sum(total_tokens) as total_tokens_raw sum(requests) as requests_raw sum(prompt_tokens) as prompt_tokens_raw sum(completion_tokens) as completion_tokens_raw dc(normalized_subkey) as key_count values(friendly_name) as friendly_name values(email) as email by grouping_key
+| eval display_name=case(
+    isnotnull(friendly_name) AND isnotnull(email), friendly_name + " &lt;" + email + "&gt;",
+    isnotnull(friendly_name), friendly_name,
+    isnotnull(email), email,
+    match(grouping_key, "^sha256:"), "User-" + substr(grouping_key, 8, 16),
+    1==1, grouping_key
+)
+| eval "Avg Tokens/Request"=round(total_tokens_raw/requests_raw, 2)
+| eval "Total Tokens"=tostring(total_tokens_raw, "commas")
+| eval "Requests"=tostring(requests_raw, "commas")
+| eval "Prompt Tokens"=tostring(prompt_tokens_raw, "commas")
+| eval "Completion Tokens"=tostring(completion_tokens_raw, "commas")
+| eval "Keys"=key_count
+| rename display_name as "User"
+| table "User" "Total Tokens" "Requests" "Prompt Tokens" "Completion Tokens" "Keys" "Avg Tokens/Request"
+| sort - total_tokens_raw
+| fields - total_tokens_raw requests_raw prompt_tokens_raw completion_tokens_raw key_count
+| head 10</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">10</option>
+      </table>
+    </panel>
+    <panel>
+      <title>Token Distribution by Model</title>
+      <chart>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| stats sum(total_tokens) as total_tokens by model</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.legend.placement">right</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Hourly Usage Pattern (24-Hour Clock)</title>
+      <chart>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| eval hour=strftime(_time, "%H")
+| stats sum(total_tokens) as total_tokens by hour
+| sort hour</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.axisTitleX.text">Hour of Day</option>
+        <option name="charting.axisTitleY.text">Total Tokens</option>
+        <option name="charting.legend.placement">none</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Daily Usage Summary</title>
+      <chart>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| timechart span=1d sum(total_tokens) as "Total Tokens" sum(requests) as "Requests"</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.axisTitleX.text">Date</option>
+        <option name="charting.axisTitleY.text">Count</option>
+        <option name="charting.legend.placement">bottom</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Request Success Rate</title>
+      <chart>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| timechart span=1h count(eval(success==1 OR success=="true")) as "Successful" count(eval(success==0 OR success=="false")) as "Failed"</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Request Count</option>
+        <option name="charting.legend.placement">bottom</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Recent Errors</title>
+      <table>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage:error"
+| stats count by error_type error_message
+| sort - count</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">10</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Recent API Requests</title>
+      <table>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| eval timestamp=strftime(_time, "%Y-%m-%d %H:%M:%S")
+| eval normalized_subkey=if(match(subkey, "^sha256:"), subkey, "sha256:" + substr(sha256(subkey), 1, 16))
+| eval display_name=case(
+    isnotnull(friendly_name) AND isnotnull(email), friendly_name + " &lt;" + email + "&gt;",
+    isnotnull(friendly_name), friendly_name,
+    1==1, "User-" + substr(normalized_subkey, 8, 16)
+)
+| table timestamp display_name model total_tokens prompt_tokens completion_tokens requests status_code success
+| rename display_name as "User"
+| sort - timestamp
+| head 50</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+        <option name="count">20</option>
+        <option name="wrap">true</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Users With vs Without Names</title>
+      <chart>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| eval has_name=if(isnotnull(friendly_name), "With Name", "Without Name")
+| stats sum(total_tokens) as total_tokens by has_name</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.legend.placement">bottom</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Cost by Model</title>
+      <chart>
+        <search base="base_usage_with_cost">
+          <query>| stats sum(cost) as cost by model
+| eval cost=round(cost, 4)
+| sort -cost</query>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.axisTitleX.text">Cost (USD)</option>
+        <option name="charting.axisTitleY.text">Model</option>
+        <option name="charting.legend.placement">none</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Cost Over Time</title>
+      <chart>
+        <search base="base_usage_with_cost">
+          <query>| timechart span=1h sum(cost) as hourly_cost
+| eval hourly_cost=round(hourly_cost, 4)</query>
+        </search>
+        <option name="charting.chart">column</option>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Cost (USD)</option>
+        <option name="charting.legend.placement">none</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Top 10 Users by Cost</title>
+        <table>
+          <search base="base_usage_with_cost">
+            <query>| eval normalized_subkey=if(match(subkey, "^sha256:"), subkey, "sha256:" + substr(sha256(subkey), 1, 16))
+| eval grouping_key=coalesce(email, normalized_subkey)
+| stats sum(cost) as total_cost, sum(total_tokens) as tokens, sum(requests) as requests, dc(normalized_subkey) as key_count, values(friendly_name) as friendly_name, values(email) as email by grouping_key
+| eval display_name=case(
+    isnotnull(friendly_name) AND isnotnull(email), friendly_name + " &lt;" + email + "&gt;",
+    isnotnull(friendly_name), friendly_name,
+    isnotnull(email), email,
+    match(grouping_key, "^sha256:"), "User-" + substr(grouping_key, 8, 16),
+    1==1, grouping_key
+)
+| eval total_cost="$" + tostring(round(total_cost, 4), "commas")
+| eval tokens=tostring(tokens, "commas")
+| eval keys=key_count
+| sort -total_cost
+| head 10
+| rename display_name as "User", total_cost as "Total Cost", tokens as "Tokens", requests as "Requests", keys as "Keys"
+| table "User" "Total Cost" "Tokens" "Requests" "Keys"</query>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Streaming vs Non-Streaming Requests</title>
+      <chart>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| eval request_type=if(is_streaming=true, "Streaming", "Non-Streaming")
+| stats sum(requests) as count by request_type</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="charting.chart">pie</option>
+        <option name="charting.legend.placement">bottom</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Tokens by Request Type</title>
+      <chart>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage"
+| eval request_type=if(is_streaming=true, "Streaming", "Non-Streaming")
+| stats sum(total_tokens) as total_tokens by request_type</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.axisTitleX.text">Total Tokens</option>
+        <option name="charting.axisTitleY.text">Request Type</option>
+        <option name="charting.legend.placement">none</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Cost by Request Type</title>
+      <chart>
+        <search base="base_usage_with_cost">
+          <query>| eval request_type=if(is_streaming=true, "Streaming", "Non-Streaming")
+| stats sum(cost) as cost by request_type
+| eval cost=round(cost, 4)</query>
+        </search>
+        <option name="charting.chart">bar</option>
+        <option name="charting.axisTitleX.text">Cost (USD)</option>
+        <option name="charting.axisTitleY.text">Request Type</option>
+        <option name="charting.legend.placement">none</option>
+      </chart>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Daily Cost Trend</title>
+      <chart>
+        <search base="base_usage_with_cost">
+          <query>| timechart span=1d sum(cost) as daily_cost
+| eval daily_cost=round(daily_cost, 2)</query>
+        </search>
+        <option name="charting.chart">area</option>
+        <option name="charting.axisTitleX.text">Date</option>
+        <option name="charting.axisTitleY.text">Cost (USD)</option>
+        <option name="charting.legend.placement">none</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Average Cost per Request by Model</title>
+      <table>
+        <search base="base_usage_with_cost">
+          <query>| stats sum(cost) as total_cost, sum(requests) as total_requests by model
+| eval avg_cost_per_request=total_cost/total_requests
+| eval avg_cost_per_request="$" + tostring(round(avg_cost_per_request, 6), "commas")
+| eval total_cost="$" + tostring(round(total_cost, 2), "commas")
+| sort -total_cost
+| rename model as "Model", total_cost as "Total Cost", total_requests as "Requests", avg_cost_per_request as "Avg Cost/Request"</query>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Circuit API Rate Limit Status</title>
+      <table>
+        <search>
+          <query>index=oai_circuit sourcetype="llm:usage" circuit_rate_limits=*
+| head 1
+| spath input=circuit_rate_limits
+| table _time circuit_rate_limits*
+| rename circuit_rate_limits as "Rate Limit Data"</query>
+          <earliest>$time_picker.earliest$</earliest>
+          <latest>$time_picker.latest$</latest>
+        </search>
+        <option name="drilldown">none</option>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <html>
+        <h3>Dashboard Information</h3>
+        <p>
+          <b>New in this version:</b>
+        </p>
+        <ul>
+          <li>
+            <b>Cost Tracking:</b> Estimated API costs based on token usage and model pricing</li>
+          <li>
+            <b>Streaming Analysis:</b> Breakdown of streaming vs non-streaming requests</li>
+          <li>
+            <b>Rate Limit Monitoring:</b> Circuit API rate limit status (if available)</li>
+          <li>
+            <b>Enhanced Metrics:</b> Cost per request, cost by user, and cost projections</li>
+          <li>
+            <b>Key Rotation Support:</b> Users with rotated keys are aggregated by email for reporting continuity</li>
+        </ul>
+        <p>
+          <i>Note: Cost estimates are based on public OpenAI pricing and may not reflect actual Circuit API costs. Update pricing in pricing.py as needed.</i>
+        </p>
+        <p>
+          <i><b>Key Rotation:</b> When keys are rotated, usage from all keys (old and new) is aggregated by email address. The "Keys" column shows how many keys a user has had. System events without email addresses are grouped by subkey.</i>
+        </p>
+      </html>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <html>
+        <h3>Circuit API Pricing Reference</h3>
+        <p>
+          <b>Default pricing tiers for available models:</b>
+        </p>
+        <style>
+          .pricing-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            font-size: 12px;
+          }
+          .pricing-table th {
+            background-color: #2c3e50;
+            color: white;
+            padding: 8px;
+            text-align: left;
+            border: 1px solid #ddd;
+          }
+          .pricing-table td {
+            padding: 6px 8px;
+            border: 1px solid #ddd;
+          }
+          .pricing-table tr:nth-child(even) {
+            background-color: #f9f9f9;
+          }
+          .pricing-table tr:hover {
+            background-color: #f5f5f5;
+          }
+          .tier-free {
+            background-color: #e8f5e9 !important;
+          }
+          .tier-payg {
+            background-color: #fff3e0 !important;
+          }
+        </style>
+        <table class="pricing-table">
+          <thead>
+            <tr>
+              <th>Tier</th>
+              <th>Model</th>
+              <th>Requests/min</th>
+              <th>Peak Tokens/min</th>
+              <th>Input Cost (per 1M tokens)</th>
+              <th>Completion Cost (per 1M tokens)</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Free Tier -->
+            <tr class="tier-free">
+              <td>
+                <b>Free</b>
+              </td>
+              <td>GPT-4o mini</td>
+              <td>30</td>
+              <td>200K</td>
+              <td>500M free/month</td>
+              <td>50M free/month</td>
+              <td>$0 quarterly</td>
+            </tr>
+            <tr class="tier-free">
+              <td>
+                <b>Free</b>
+              </td>
+              <td>GPT-4.1</td>
+              <td>15</td>
+              <td>120K</td>
+              <td>50M free/month</td>
+              <td>5M free/month</td>
+              <td>$0 quarterly</td>
+            </tr>
+
+            <!-- Pay-as-you-use Tier - Sorted by Completion Cost (Low to High) -->
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>GPT-5-nano</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$0.055</td>
+              <td>$0.44</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>GPT-4o mini</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$0.15</td>
+              <td>$0.60</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>GPT-5 mini</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$0.25</td>
+              <td>$2.00</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Gemini 2.5 Flash Preview</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$0.30</td>
+              <td>$2.50</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>GPT-o4 mini</td>
+              <td>Unlimited</td>
+              <td>200K</td>
+              <td>$1.10</td>
+              <td>$4.40</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Claude Haiku 4.5</td>
+              <td>Unlimited</td>
+              <td>200K</td>
+              <td>$1.10</td>
+              <td>$5.50</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>GPT-4.1</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$2.00</td>
+              <td>$8.00</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>GPT-o3</td>
+              <td>Unlimited</td>
+              <td>200K</td>
+              <td>$2.00</td>
+              <td>$8.00</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>GPT-4o</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$2.50</td>
+              <td>$10.00</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>GPT-5 chat</td>
+              <td>Unlimited</td>
+              <td>120K</td>
+              <td>$1.25</td>
+              <td>$10.00</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>GPT-5</td>
+              <td>Unlimited</td>
+              <td>270K</td>
+              <td>$1.375</td>
+              <td>$11.00</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Gemini 2.5 Pro Exp</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$1.25 (&lt;200 tokens)<br/>$2.50 (&gt;200 tokens)</td>
+              <td>$10.00 (&lt;200 tokens)<br/>$15.00 (&gt;200 tokens)</td>
+              <td>Variable pricing</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Claude Sonnet 4</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$6.00</td>
+              <td>$22.50</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Claude Sonnet 4.5</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$6.60</td>
+              <td>$24.75</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Claude Opus 4.5</td>
+              <td>Unlimited</td>
+              <td>200K</td>
+              <td>$5.00</td>
+              <td>$25.00</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Claude Opus 4.1</td>
+              <td>Unlimited</td>
+              <td>200K</td>
+              <td>$15.00</td>
+              <td>$75.00</td>
+              <td>Based on usage</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="margin-top: 15px;">
+          <i>
+            <b>Note:</b> Pricing shown is for reference only. Actual costs may vary. Free tier models include monthly token allowances. Pay-as-you-use models are charged based on actual token consumption. Update pricing in pricing.py to match your specific Circuit API costs.</i>
+        </p>
+      </html>
+    </panel>
+  </row>
+</form>
