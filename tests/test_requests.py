@@ -84,6 +84,9 @@ def _make_test_config(*, quota_db_path: str, require_subkey: bool, circuit_appke
         splunk_sourcetype="llm:usage",
         splunk_index="main",
         splunk_verify_ssl=True,
+        admin_username="admin",
+        admin_password="",
+        admin_title="Circuit Bridge Admin",
     )
 
 def test_health_check_flags(tmp_path: Path):

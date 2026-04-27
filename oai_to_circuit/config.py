@@ -22,6 +22,10 @@ class BridgeConfig:
     splunk_index: str
     splunk_verify_ssl: bool
 
+    admin_username: str
+    admin_password: str
+    admin_title: str
+
 
 def load_config() -> BridgeConfig:
     return BridgeConfig(
@@ -37,8 +41,9 @@ def load_config() -> BridgeConfig:
         splunk_hec_token=os.environ.get("SPLUNK_HEC_TOKEN", ""),
         splunk_source=os.environ.get("SPLUNK_SOURCE", "oai-to-circuit"),
         splunk_sourcetype=os.environ.get("SPLUNK_SOURCETYPE", "llm:usage"),
-        splunk_index=os.environ.get("SPLUNK_INDEX", "oai_circuit"),
+        splunk_index=os.environ.get("SPLUNK_INDEX", "main"),
         splunk_verify_ssl=os.environ.get("SPLUNK_VERIFY_SSL", "true").lower() in ("1", "true", "yes"),
+        admin_username=os.environ.get("ADMIN_USERNAME", "admin"),
+        admin_password=os.environ.get("ADMIN_PASSWORD", ""),
+        admin_title=os.environ.get("ADMIN_TITLE", "Circuit Bridge Admin"),
     )
-
-

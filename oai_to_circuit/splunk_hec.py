@@ -23,7 +23,7 @@ class SplunkHEC:
         sourcetype: str = "llm:usage",
         index: str = "oai_circuit",
         timeout: float = 5.0,
-        hash_subkeys: bool = True,
+        hash_subkeys: bool = False,
         verify_ssl: bool = True,
     ):
         self.hec_url = hec_url
@@ -364,4 +364,3 @@ class SplunkHEC:
                 exc_info=True
             )
             return False
-

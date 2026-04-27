@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ admin_title }}</title>
+    <link rel="stylesheet" href="/admin/static/admin.css" />
+    <script defer src="/admin/static/admin.js"></script>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="masthead">
+        <div>
+          <p class="eyebrow">OAI to Circuit</p>
+          <h1>{{ admin_title }}</h1>
+          <p class="masthead__subtitle">User access, quota policy, and usage visibility from the bridge itself.</p>
+        </div>
+        <div class="masthead__meta">
+          <span class="pill">{{ quota_storage.label }}</span>
+          {% if admin_auth_enabled %}
+          <span class="pill pill--secure">Basic auth enabled</span>
+          {% endif %}
+        </div>
+      </header>
+
+      <nav class="tabs" aria-label="Admin navigation">
+        <a href="/admin" class="tabs__link{% if section == 'overview' %} is-active{% endif %}">Overview</a>
+        <a href="/admin/users" class="tabs__link{% if section == 'users' %} is-active{% endif %}">Users</a>
+      </nav>
+
+      <section class="banner">
+        <strong>{{ quota_storage.label }}</strong>
+        <span>{{ quota_storage.detail }}</span>
+      </section>
+
+      {% if notice %}
+      <section class="flash flash--success">{{ notice }}</section>
+      {% endif %}
+      {% if error %}
+      <section class="flash flash--error">{{ error }}</section>
+      {% endif %}
+
+      {% block content %}{% endblock %}
+    </div>
+  </body>
+</html>

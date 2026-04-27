@@ -2,6 +2,7 @@ import os
 import json
 import sqlite3
 import threading
+from copy import deepcopy
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Optional, Dict, Tuple
@@ -249,6 +250,68 @@ class QuotaManager:
                 return None, None
             return row[0], row[1]
 
+    def snapshot_quotas(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
+        with self._lock:
+            return deepcopy(self.quotas)
+
+    def replace_quotas(self, quotas: Dict[str, Dict[str, Dict[str, Any]]]) -> None:
+        with self._lock:
+            self.quotas = deepcopy(quotas or {})
+
+    def upsert_subkey_profile(
+        self,
+        subkey: str,
+        friendly_name: str,
+        email: str = "",
+        description: str = "",
+    ) -> None:
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO subkey_names (subkey, friendly_name, email, description)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(subkey) DO UPDATE SET
+                        friendly_name = excluded.friendly_name,
+                        email = excluded.email,
+                        description = excluded.description,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (subkey, friendly_name, email, description),
+                )
+                conn.commit()
+
+    def set_subkey_status(
+        self,
+        subkey: str,
+        status: str,
+        revoke_reason: str = "",
+    ) -> None:
+        normalized_status = (status or "active").strip().lower()
+        if normalized_status not in {"active", "revoked"}:
+            normalized_status = "active"
+
+        revoked_at = None
+        reason = None
+        if normalized_status == "revoked":
+            revoked_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            reason = revoke_reason.strip() or None
+
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO key_lifecycle (subkey, status, revoked_at, revoke_reason)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(subkey) DO UPDATE SET
+                        status = excluded.status,
+                        revoked_at = excluded.revoked_at,
+                        revoke_reason = excluded.revoke_reason
+                    """,
+                    (subkey, normalized_status, revoked_at, reason),
+                )
+                conn.commit()
+
     def record_usage(
         self,
         subkey: str,
@@ -320,4 +383,3 @@ def load_quotas_from_env_or_file() -> Dict[str, Dict[str, Dict[str, Any]]]:
         except Exception:
             return {}
     return {}
-

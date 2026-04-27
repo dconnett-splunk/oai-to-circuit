@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from oai_to_circuit.admin import register_admin_routes
 from oai_to_circuit.config import BridgeConfig
 from oai_to_circuit.oauth import TokenCache, get_access_token
 from oai_to_circuit.quota import QuotaManager, load_quotas_from_env_or_file
@@ -158,6 +159,7 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
 
         quotas_cfg = load_quotas_from_env_or_file()
         quota_manager = QuotaManager(db_path=config.quota_db_path, quotas=quotas_cfg)
+        app.state.quota_manager = quota_manager
         logger.info(
             f"Quotas enabled: {bool(quotas_cfg)} (db={config.quota_db_path}, require_subkey={config.require_subkey})"
         )
@@ -172,6 +174,7 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
             verify_ssl=config.splunk_verify_ssl,
             hash_subkeys=True,  # Always hash subkeys for privacy
         )
+        app.state.splunk_hec = splunk_hec
 
         if not config.circuit_client_id:
             logger.warning("⚠️  Missing CIRCUIT_CLIENT_ID - authentication will fail!")
@@ -184,12 +187,16 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
         logger.info("Shutting down OpenAI to Circuit Bridge server")
 
     app = FastAPI(title="OpenAI to Circuit Bridge", version="1.0.0", lifespan=lifespan)
+    app.state.config = config
+    app.state.quota_manager = None
+    app.state.splunk_hec = None
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_methods=["POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["*"],
     )
+    register_admin_routes(app, config=config)
 
     @app.get("/health")
     async def health_check():

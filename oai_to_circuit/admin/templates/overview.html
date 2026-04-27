@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="stats-grid">
+  {% for metric in metrics %}
+  <article class="panel metric">
+    <p class="panel__eyebrow">{{ metric.label }}</p>
+    <h2>{{ metric.value }}</h2>
+    <p class="panel__detail">{{ metric.detail }}</p>
+  </article>
+  {% endfor %}
+</section>
+
+<section class="panel-grid">
+  <article class="panel">
+    <div class="panel__head">
+      <div>
+        <p class="panel__eyebrow">Monthly requests</p>
+        <h2>Usage trend</h2>
+      </div>
+    </div>
+    {% if monthly_requests %}
+    <div class="bar-chart" aria-label="Monthly request totals">
+      {% for point in monthly_requests %}
+      <figure class="bar-chart__item">
+        <div class="bar-chart__track">
+          <div class="bar-chart__bar" style="height: {{ point.height_pct }}%"></div>
+        </div>
+        <figcaption>
+          <strong>{{ point.value_label }}</strong>
+          <span>{{ point.label }}</span>
+        </figcaption>
+      </figure>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">No monthly request history yet.</p>
+    {% endif %}
+  </article>
+
+  <article class="panel">
+    <div class="panel__head">
+      <div>
+        <p class="panel__eyebrow">Monthly tokens</p>
+        <h2>Token consumption</h2>
+      </div>
+    </div>
+    {% if monthly_tokens %}
+    <div class="bar-chart" aria-label="Monthly token totals">
+      {% for point in monthly_tokens %}
+      <figure class="bar-chart__item">
+        <div class="bar-chart__track">
+          <div class="bar-chart__bar bar-chart__bar--accent" style="height: {{ point.height_pct }}%"></div>
+        </div>
+        <figcaption>
+          <strong>{{ point.value_label }}</strong>
+          <span>{{ point.label }}</span>
+        </figcaption>
+      </figure>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">No token history yet.</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="panel-grid">
+  <article class="panel">
+    <div class="panel__head">
+      <div>
+        <p class="panel__eyebrow">Top users</p>
+        <h2>By total tokens</h2>
+      </div>
+      <a href="/admin/users" class="panel__action">Manage users</a>
+    </div>
+    {% if top_users %}
+    <div class="progress-list">
+      {% for row in top_users %}
+      <div class="progress-row">
+        <div class="progress-row__meta">
+          <strong>{{ row.label }}</strong>
+          <span>{{ row.detail }}</span>
+        </div>
+        <div class="progress-row__track">
+          <div class="progress-row__fill" style="width: {{ row.width_pct }}%"></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">No user activity recorded yet.</p>
+    {% endif %}
+  </article>
+
+  <article class="panel">
+    <div class="panel__head">
+      <div>
+        <p class="panel__eyebrow">Top models</p>
+        <h2>Where usage lands</h2>
+      </div>
+    </div>
+    {% if top_models %}
+    <div class="progress-list">
+      {% for row in top_models %}
+      <div class="progress-row">
+        <div class="progress-row__meta">
+          <strong>{{ row.label }}</strong>
+          <span>{{ row.detail }}</span>
+        </div>
+        <div class="progress-row__track">
+          <div class="progress-row__fill progress-row__fill--accent" style="width: {{ row.width_pct }}%"></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">No model activity recorded yet.</p>
+    {% endif %}
+  </article>
+</section>
+{% endblock %}

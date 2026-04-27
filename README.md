@@ -71,6 +71,11 @@ Optional Splunk HEC integration (for usage analytics):
 - `SPLUNK_SOURCETYPE` (default: `llm:usage`) – Event sourcetype
 - `SPLUNK_INDEX` (default: `main`) – Splunk index name
 
+Optional admin interface:
+- `ADMIN_USERNAME` (default: `admin`) – username for the admin UI when auth is enabled
+- `ADMIN_PASSWORD` – if set, `/admin` is protected with HTTP Basic auth
+- `ADMIN_TITLE` (default: `Circuit Bridge Admin`) – heading shown in the admin UI
+
 Caller subkey is read from either header `X-Bridge-Subkey: <subkey>` or `Authorization: Bearer <subkey>`. The subkey is NOT forwarded to Circuit; it is only used locally for per-model quotas and usage tracking.
 
 Example `quotas.json` (with model blacklisting):
@@ -102,6 +107,19 @@ Start the server:
 - HTTP only: `python rewriter.py`
 - HTTPS only: `python rewriter.py --ssl-only`
 - Dual: `python rewriter.py --ssl`
+
+## Admin Interface
+
+The bridge now includes an embedded admin console at [`/admin`](http://localhost:12000/admin).
+
+It includes:
+- Overview stats for total requests, tokens, top users, and model mix
+- A user directory with generated subkeys, owner metadata, lifecycle status, and usage
+- Per-user quota editing with wildcard and per-model rules
+
+If `QUOTAS_JSON_PATH` is file-backed, quota edits are written back to that file. If `QUOTAS_JSON` is set inline, the UI warns that quota edits are runtime-only and will be lost on restart.
+
+For any non-local deployment, set `ADMIN_PASSWORD` so the admin routes require HTTP Basic auth.
 
 ## ChatGPT CLI (demo)
 

@@ -44,6 +44,11 @@ def add_names_table(db_path: str) -> None:
 
 def add_name_mapping(db_path: str, subkey: str, friendly_name: str, email: str = "", description: str = "") -> None:
     """Add or update a name mapping for a subkey."""
+    # Backward compatibility: older callers passed description as the fourth argument.
+    if email and not description and "@" not in email:
+        description = email
+        email = ""
+
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
     
@@ -182,4 +187,3 @@ Examples:
 
 if __name__ == "__main__":
     main()
-

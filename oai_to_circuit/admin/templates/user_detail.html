@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="user-hero panel">
+  <div class="user-hero__identity">
+    <p class="panel__eyebrow">User detail</p>
+    <h2>{{ user.friendly_name }}</h2>
+    <p>{{ user.description or "No description yet." }}</p>
+    <div class="hero-chips">
+      <span class="status-badge status-badge--{{ user.status }}">{{ user.status }}</span>
+      <span class="pill">{{ user.default_quota_label }}</span>
+      {% if user.email %}
+      <span class="pill">{{ user.email }}</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="user-hero__key">
+    <p class="panel__eyebrow">Subkey</p>
+    <code>{{ user.subkey }}</code>
+    <button type="button" class="button button--ghost" data-copy-text="{{ user.subkey }}">Copy key</button>
+  </div>
+</section>
+
+<section class="stats-grid">
+  <article class="panel metric">
+    <p class="panel__eyebrow">Requests</p>
+    <h2>{{ "{:,}".format(user.requests) }}</h2>
+    <p class="panel__detail">All-time requests recorded by the bridge.</p>
+  </article>
+  <article class="panel metric">
+    <p class="panel__eyebrow">Total tokens</p>
+    <h2>{{ "{:,}".format(user.total_tokens) }}</h2>
+    <p class="panel__detail">All prompt and completion tokens.</p>
+  </article>
+  <article class="panel metric">
+    <p class="panel__eyebrow">Prompt tokens</p>
+    <h2>{{ "{:,}".format(user.prompt_tokens) }}</h2>
+    <p class="panel__detail">Prompt-side usage across all models.</p>
+  </article>
+  <article class="panel metric">
+    <p class="panel__eyebrow">Completion tokens</p>
+    <h2>{{ "{:,}".format(user.completion_tokens) }}</h2>
+    <p class="panel__detail">Completion-side usage across all models.</p>
+  </article>
+</section>
+
+<section class="content-grid">
+  <article class="panel panel--form">
+    <div class="panel__head">
+      <div>
+        <p class="panel__eyebrow">Profile</p>
+        <h2>Owner details</h2>
+      </div>
+    </div>
+    <form method="post" action="/admin/users/{{ user.subkey | urlencode }}/profile" class="stack-form">
+      <label>
+        <span>Friendly name</span>
+        <input type="text" name="friendly_name" value="{{ user.friendly_name }}" required />
+      </label>
+      <label>
+        <span>Email</span>
+        <input type="email" name="email" value="{{ user.email }}" />
+      </label>
+      <label>
+        <span>Description</span>
+        <textarea name="description" rows="4">{{ user.description }}</textarea>
+      </label>
+      <button type="submit" class="button">Save profile</button>
+    </form>
+
+    <div class="panel__head panel__head--split">
+      <div>
+        <p class="panel__eyebrow">Access</p>
+        <h2>Lifecycle state</h2>
+      </div>
+    </div>
+    <form method="post" action="/admin/users/{{ user.subkey | urlencode }}/status" class="stack-form">
+      <label>
+        <span>Status</span>
+        <select name="status">
+          <option value="active" {% if user.status == 'active' %}selected{% endif %}>active</option>
+          <option value="revoked" {% if user.status == 'revoked' %}selected{% endif %}>revoked</option>
+        </select>
+      </label>
+      <label>
+        <span>Revoke reason</span>
+        <textarea name="revoke_reason" rows="3" placeholder="Only needed when revoking access">{{ user.revoke_reason }}</textarea>
+      </label>
+      <button type="submit" class="button button--secondary">Update access</button>
+    </form>
+  </article>
+
+  <article class="panel">
+    <div class="panel__head">
+      <div>
+        <p class="panel__eyebrow">Usage history</p>
+        <h2>Monthly totals</h2>
+      </div>
+    </div>
+
+    {% if user.monthly_requests %}
+    <div class="bar-chart bar-chart--tight">
+      {% for point in user.monthly_requests %}
+      <figure class="bar-chart__item">
+        <div class="bar-chart__track">
+          <div class="bar-chart__bar" style="height: {{ point.height_pct }}%"></div>
+        </div>
+        <figcaption>
+          <strong>{{ point.value_label }}</strong>
+          <span>{{ point.label }}</span>
+        </figcaption>
+      </figure>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">No monthly request history yet.</p>
+    {% endif %}
+
+    {% if user.monthly_tokens %}
+    <div class="bar-chart bar-chart--tight">
+      {% for point in user.monthly_tokens %}
+      <figure class="bar-chart__item">
+        <div class="bar-chart__track">
+          <div class="bar-chart__bar bar-chart__bar--accent" style="height: {{ point.height_pct }}%"></div>
+        </div>
+        <figcaption>
+          <strong>{{ point.value_label }}</strong>
+          <span>{{ point.label }}</span>
+        </figcaption>
+      </figure>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel__head">
+    <div>
+      <p class="panel__eyebrow">Usage by model</p>
+      <h2>Observed activity and current limits</h2>
+    </div>
+  </div>
+  {% if user.usage_rows %}
+  <div class="table-shell">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Model</th>
+          <th>Requests</th>
+          <th>Total tokens</th>
+          <th>Request limit</th>
+          <th>Token limit</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in user.usage_rows %}
+        <tr>
+          <td>{{ row.model }}</td>
+          <td>
+            <strong>{{ "{:,}".format(row.requests) }}</strong>
+            {% if row.request_progress is not none %}
+            <div class="mini-progress">
+              <div class="mini-progress__fill" style="width: {{ row.request_progress }}%"></div>
+            </div>
+            {% endif %}
+          </td>
+          <td>
+            <strong>{{ "{:,}".format(row.total_tokens) }}</strong>
+            {% if row.token_progress is not none %}
+            <div class="mini-progress">
+              <div class="mini-progress__fill mini-progress__fill--accent" style="width: {{ row.token_progress }}%"></div>
+            </div>
+            {% endif %}
+          </td>
+          <td>{{ "{:,}".format(row.requests_limit) if row.requests_limit is not none else "Unlimited" }}</td>
+          <td>{{ "{:,}".format(row.total_tokens_limit) if row.total_tokens_limit is not none else "Unlimited" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty-state">No usage recorded yet. Quota rules below still apply once requests arrive.</p>
+  {% endif %}
+</section>
+
+<section class="panel panel--form">
+  <div class="panel__head">
+    <div>
+      <p class="panel__eyebrow">Quota rules</p>
+      <h2>Edit wildcard and per-model limits</h2>
+    </div>
+  </div>
+  <form method="post" action="/admin/users/{{ user.subkey | urlencode }}/quotas" class="stack-form">
+    <div class="quota-editor" data-quota-editor>
+      <div class="quota-editor__head">
+        <div>
+          <p class="panel__eyebrow">Policy</p>
+          <h3>Blank limits mean unlimited</h3>
+        </div>
+        <button type="button" class="button button--ghost" data-add-quota-row>Add rule</button>
+      </div>
+      <div class="quota-rows" data-quota-rows>
+        {% for rule in user.quota_rows %}
+        <div class="quota-row">
+          <input type="text" name="quota_model" value="{{ rule.model }}" placeholder="Model or *" />
+          <input type="number" min="0" name="quota_requests" value="{{ rule.requests }}" placeholder="Requests" />
+          <input type="number" min="0" name="quota_tokens" value="{{ rule.total_tokens }}" placeholder="Total tokens" />
+          <select name="quota_pricing_tier">
+            <option value="auto" {% if rule.pricing_tier == 'auto' %}selected{% endif %}>auto</option>
+            <option value="free" {% if rule.pricing_tier == 'free' %}selected{% endif %}>free</option>
+            <option value="payg" {% if rule.pricing_tier == 'payg' %}selected{% endif %}>payg</option>
+          </select>
+          <button type="button" class="button button--ghost" data-remove-quota-row>Remove</button>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    <button type="submit" class="button">Save quotas</button>
+  </form>
+</section>
+
+<template id="quota-row-template">
+  <div class="quota-row">
+    <input type="text" name="quota_model" placeholder="Model or *" />
+    <input type="number" min="0" name="quota_requests" placeholder="Requests" />
+    <input type="number" min="0" name="quota_tokens" placeholder="Total tokens" />
+    <select name="quota_pricing_tier">
+      <option value="auto" selected>auto</option>
+      <option value="free">free</option>
+      <option value="payg">payg</option>
+    </select>
+    <button type="button" class="button button--ghost" data-remove-quota-row>Remove</button>
+  </div>
+</template>
+{% endblock %}

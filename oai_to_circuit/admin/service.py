@@ -1,0 +1,629 @@
+import json
+import os
+import sqlite3
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+
+from oai_to_circuit.quota import QuotaManager
+from oai_to_circuit.subkeys import generate_subkey, is_valid_subkey
+
+
+@dataclass(frozen=True)
+class MetricCard:
+    label: str
+    value: str
+    detail: str
+
+
+@dataclass(frozen=True)
+class BarPoint:
+    label: str
+    value: int
+    value_label: str
+    height_pct: float
+
+
+@dataclass(frozen=True)
+class ProgressRow:
+    label: str
+    value: int
+    value_label: str
+    width_pct: float
+    detail: str
+
+
+@dataclass(frozen=True)
+class StorageStatus:
+    mode: str
+    label: str
+    path: Optional[str]
+    writable: bool
+    detail: str
+
+
+@dataclass(frozen=True)
+class UserSummary:
+    subkey: str
+    friendly_name: str
+    email: str
+    description: str
+    status: str
+    requests: int
+    total_tokens: int
+    model_count: int
+    quota_label: str
+
+
+@dataclass(frozen=True)
+class UsageRow:
+    model: str
+    requests: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    requests_limit: Optional[int]
+    total_tokens_limit: Optional[int]
+    request_progress: Optional[float]
+    token_progress: Optional[float]
+
+
+@dataclass(frozen=True)
+class QuotaRuleRow:
+    model: str
+    requests: str
+    total_tokens: str
+    pricing_tier: str
+
+
+@dataclass(frozen=True)
+class UserDetail:
+    subkey: str
+    friendly_name: str
+    email: str
+    description: str
+    status: str
+    revoke_reason: str
+    created_at: str
+    requests: int
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    usage_rows: List[UsageRow]
+    monthly_requests: List[BarPoint]
+    monthly_tokens: List[BarPoint]
+    quota_rows: List[QuotaRuleRow]
+    default_quota_label: str
+
+
+def _connect(db_path: str) -> sqlite3.Connection:
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _format_number(value: int) -> str:
+    return f"{int(value):,}"
+
+
+def _limit_to_text(value: Optional[int]) -> str:
+    return "Unlimited" if value is None else _format_number(value)
+
+
+def _ratio(current: int, limit: Optional[int]) -> Optional[float]:
+    if limit is None or limit <= 0:
+        return None
+    return min(100.0, round((current / limit) * 100.0, 1))
+
+
+def _chart_points(rows: Sequence[Tuple[str, int]]) -> List[BarPoint]:
+    if not rows:
+        return []
+
+    max_value = max(value for _, value in rows) or 1
+    points: List[BarPoint] = []
+    for label, value in rows:
+        points.append(
+            BarPoint(
+                label=label,
+                value=value,
+                value_label=_format_number(value),
+                height_pct=max(8.0, round((value / max_value) * 100.0, 1)) if value else 0.0,
+            )
+        )
+    return points
+
+
+def _progress_rows(rows: Sequence[Tuple[str, int]], *, detail_label: str) -> List[ProgressRow]:
+    if not rows:
+        return []
+
+    max_value = max(value for _, value in rows) or 1
+    return [
+        ProgressRow(
+            label=label,
+            value=value,
+            value_label=_format_number(value),
+            width_pct=max(6.0, round((value / max_value) * 100.0, 1)) if value else 0.0,
+            detail=f"{_format_number(value)} {detail_label}",
+        )
+        for label, value in rows
+    ]
+
+
+def _default_quota_label(quota_rules: Mapping[str, Mapping[str, Any]]) -> str:
+    wildcard = quota_rules.get("*") or {}
+    if not quota_rules:
+        return "Unlimited access"
+    if not wildcard:
+        return f"{len(quota_rules)} model rule(s)"
+
+    parts: List[str] = []
+    if wildcard.get("requests") is not None:
+        parts.append(f"{_format_number(int(wildcard['requests']))} req")
+    if wildcard.get("total_tokens") is not None:
+        parts.append(f"{_format_number(int(wildcard['total_tokens']))} tok")
+    if not parts:
+        parts.append("Wildcard rule")
+
+    override_count = len([model for model in quota_rules if model != "*"])
+    if override_count:
+        parts.append(f"+{override_count} override(s)")
+    return " / ".join(parts)
+
+
+def get_quota_storage_status() -> StorageStatus:
+    inline_config = os.environ.get("QUOTAS_JSON", "").strip()
+    if inline_config:
+        return StorageStatus(
+            mode="env",
+            label="Runtime quotas",
+            path=None,
+            writable=False,
+            detail="QUOTAS_JSON is set. Admin changes update the running process only and will be lost after restart.",
+        )
+
+    path = os.environ.get("QUOTAS_JSON_PATH", "quotas.json")
+    return StorageStatus(
+        mode="file",
+        label="File-backed quotas",
+        path=path,
+        writable=True,
+        detail=f"Quota edits are persisted to {path}.",
+    )
+
+
+def build_overview_context(quota_manager: QuotaManager) -> Dict[str, Any]:
+    quotas = quota_manager.snapshot_quotas()
+    with _connect(quota_manager.db_path) as conn:
+        totals = conn.execute(
+            """
+            SELECT
+                COALESCE(SUM(requests), 0) AS requests,
+                COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                COUNT(DISTINCT subkey) AS users,
+                COUNT(DISTINCT model) AS models
+            FROM usage
+            """
+        ).fetchone()
+        monthly = conn.execute(
+            """
+            SELECT usage_month, COALESCE(SUM(requests), 0) AS requests, COALESCE(SUM(total_tokens), 0) AS total_tokens
+            FROM monthly_usage
+            GROUP BY usage_month
+            ORDER BY usage_month ASC
+            """
+        ).fetchall()
+        top_users_rows = conn.execute(
+            """
+            SELECT
+                COALESCE(n.friendly_name, u.subkey) AS label,
+                COALESCE(SUM(u.total_tokens), 0) AS total_tokens
+            FROM usage u
+            LEFT JOIN subkey_names n ON u.subkey = n.subkey
+            GROUP BY u.subkey
+            ORDER BY total_tokens DESC, label ASC
+            LIMIT 6
+            """
+        ).fetchall()
+        model_rows = conn.execute(
+            """
+            SELECT model, COALESCE(SUM(total_tokens), 0) AS total_tokens
+            FROM usage
+            GROUP BY model
+            ORDER BY total_tokens DESC, model ASC
+            LIMIT 6
+            """
+        ).fetchall()
+
+    monthly_requests = _chart_points([(row["usage_month"], int(row["requests"])) for row in monthly])
+    monthly_tokens = _chart_points([(row["usage_month"], int(row["total_tokens"])) for row in monthly])
+    top_users = _progress_rows([(row["label"], int(row["total_tokens"])) for row in top_users_rows], detail_label="tokens")
+    top_models = _progress_rows([(row["model"], int(row["total_tokens"])) for row in model_rows], detail_label="tokens")
+
+    managed_users = set(quotas.keys())
+    with _connect(quota_manager.db_path) as conn:
+        rows = conn.execute("SELECT subkey FROM subkey_names UNION SELECT subkey FROM key_lifecycle").fetchall()
+    managed_users.update(row["subkey"] for row in rows)
+
+    metrics = [
+        MetricCard("Total requests", _format_number(int(totals["requests"])), "All recorded requests"),
+        MetricCard("Total tokens", _format_number(int(totals["total_tokens"])), "Prompt + completion across every user"),
+        MetricCard("Tracked users", _format_number(len(managed_users)), "Users known from quotas or the admin database"),
+        MetricCard("Active models", _format_number(int(totals["models"])), "Models with recorded usage"),
+    ]
+
+    return {
+        "metrics": metrics,
+        "monthly_requests": monthly_requests,
+        "monthly_tokens": monthly_tokens,
+        "top_users": top_users,
+        "top_models": top_models,
+        "storage": get_quota_storage_status(),
+    }
+
+
+def list_users_context(quota_manager: QuotaManager) -> Dict[str, Any]:
+    quotas = quota_manager.snapshot_quotas()
+    summaries: Dict[str, UserSummary] = {}
+
+    with _connect(quota_manager.db_path) as conn:
+        rows = conn.execute(
+            """
+            WITH known_subkeys AS (
+                SELECT subkey FROM usage
+                UNION
+                SELECT subkey FROM subkey_names
+                UNION
+                SELECT subkey FROM key_lifecycle
+            )
+            SELECT
+                k.subkey AS subkey,
+                COALESCE(n.friendly_name, k.subkey) AS friendly_name,
+                COALESCE(n.email, '') AS email,
+                COALESCE(n.description, '') AS description,
+                COALESCE(l.status, 'active') AS status,
+                COALESCE(SUM(u.requests), 0) AS requests,
+                COALESCE(SUM(u.total_tokens), 0) AS total_tokens,
+                COUNT(DISTINCT u.model) AS model_count
+            FROM known_subkeys k
+            LEFT JOIN subkey_names n ON k.subkey = n.subkey
+            LEFT JOIN key_lifecycle l ON k.subkey = l.subkey
+            LEFT JOIN usage u ON k.subkey = u.subkey
+            GROUP BY k.subkey, n.friendly_name, n.email, n.description, l.status
+            """
+        ).fetchall()
+
+    for row in rows:
+        subkey = row["subkey"]
+        summaries[subkey] = UserSummary(
+            subkey=subkey,
+            friendly_name=row["friendly_name"],
+            email=row["email"],
+            description=row["description"],
+            status=row["status"],
+            requests=int(row["requests"]),
+            total_tokens=int(row["total_tokens"]),
+            model_count=int(row["model_count"]),
+            quota_label=_default_quota_label(quotas.get(subkey) or {}),
+        )
+
+    for subkey, quota_rules in quotas.items():
+        summaries.setdefault(
+            subkey,
+            UserSummary(
+                subkey=subkey,
+                friendly_name=subkey,
+                email="",
+                description="",
+                status="active",
+                requests=0,
+                total_tokens=0,
+                model_count=0,
+                quota_label=_default_quota_label(quota_rules),
+            ),
+        )
+
+    users = sorted(
+        summaries.values(),
+        key=lambda user: (-user.total_tokens, -user.requests, user.friendly_name.lower(), user.subkey.lower()),
+    )
+    return {"users": users, "storage": get_quota_storage_status()}
+
+
+def _combined_limits(quota_rules: Mapping[str, Mapping[str, Any]], model: str) -> Tuple[Optional[int], Optional[int]]:
+    wildcard = quota_rules.get("*") or {}
+    specific = quota_rules.get(model) or {}
+    merged = dict(wildcard)
+    merged.update(specific)
+
+    requests_limit = merged.get("requests")
+    tokens_limit = merged.get("total_tokens")
+    return (
+        int(requests_limit) if requests_limit is not None else None,
+        int(tokens_limit) if tokens_limit is not None else None,
+    )
+
+
+def get_user_detail(quota_manager: QuotaManager, subkey: str) -> Optional[UserDetail]:
+    quotas = quota_manager.snapshot_quotas()
+    quota_rules = quotas.get(subkey) or {}
+
+    with _connect(quota_manager.db_path) as conn:
+        profile = conn.execute(
+            """
+            SELECT
+                COALESCE(n.friendly_name, ?) AS friendly_name,
+                COALESCE(n.email, '') AS email,
+                COALESCE(n.description, '') AS description,
+                COALESCE(n.created_at, '') AS created_at,
+                COALESCE(l.status, 'active') AS status,
+                COALESCE(l.revoke_reason, '') AS revoke_reason
+            FROM (SELECT ? AS subkey) seed
+            LEFT JOIN subkey_names n ON seed.subkey = n.subkey
+            LEFT JOIN key_lifecycle l ON seed.subkey = l.subkey
+            """,
+            (subkey, subkey),
+        ).fetchone()
+        usage_totals = conn.execute(
+            """
+            SELECT
+                COALESCE(SUM(requests), 0) AS requests,
+                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                COALESCE(SUM(total_tokens), 0) AS total_tokens
+            FROM usage
+            WHERE subkey=?
+            """,
+            (subkey,),
+        ).fetchone()
+        usage_rows = conn.execute(
+            """
+            SELECT model, requests, prompt_tokens, completion_tokens, total_tokens
+            FROM usage
+            WHERE subkey=?
+            ORDER BY total_tokens DESC, requests DESC, model ASC
+            """,
+            (subkey,),
+        ).fetchall()
+        monthly_rows = conn.execute(
+            """
+            SELECT usage_month, COALESCE(SUM(requests), 0) AS requests, COALESCE(SUM(total_tokens), 0) AS total_tokens
+            FROM monthly_usage
+            WHERE subkey=?
+            GROUP BY usage_month
+            ORDER BY usage_month ASC
+            """,
+            (subkey,),
+        ).fetchall()
+        known = conn.execute(
+            "SELECT 1 FROM subkey_names WHERE subkey=? UNION SELECT 1 FROM usage WHERE subkey=? UNION SELECT 1 FROM key_lifecycle WHERE subkey=? LIMIT 1",
+            (subkey, subkey, subkey),
+        ).fetchone()
+
+    if not known and subkey not in quotas:
+        return None
+
+    usage_view: List[UsageRow] = []
+    for row in usage_rows:
+        requests_limit, total_tokens_limit = _combined_limits(quota_rules, row["model"])
+        usage_view.append(
+            UsageRow(
+                model=row["model"],
+                requests=int(row["requests"]),
+                prompt_tokens=int(row["prompt_tokens"]),
+                completion_tokens=int(row["completion_tokens"]),
+                total_tokens=int(row["total_tokens"]),
+                requests_limit=requests_limit,
+                total_tokens_limit=total_tokens_limit,
+                request_progress=_ratio(int(row["requests"]), requests_limit),
+                token_progress=_ratio(int(row["total_tokens"]), total_tokens_limit),
+            )
+        )
+
+    if not usage_view:
+        for model in sorted(model for model in quota_rules if model != "*"):
+            requests_limit, total_tokens_limit = _combined_limits(quota_rules, model)
+            usage_view.append(
+                UsageRow(
+                    model=model,
+                    requests=0,
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    total_tokens=0,
+                    requests_limit=requests_limit,
+                    total_tokens_limit=total_tokens_limit,
+                    request_progress=_ratio(0, requests_limit),
+                    token_progress=_ratio(0, total_tokens_limit),
+                )
+            )
+
+    quota_rows = [
+        QuotaRuleRow(
+            model=model,
+            requests="" if limits.get("requests") is None else str(limits.get("requests")),
+            total_tokens="" if limits.get("total_tokens") is None else str(limits.get("total_tokens")),
+            pricing_tier=str(limits.get("pricing_tier") or "auto"),
+        )
+        for model, limits in sorted(quota_rules.items(), key=lambda item: ("0" if item[0] == "*" else "1", item[0]))
+    ]
+    if not quota_rows:
+        quota_rows.append(QuotaRuleRow(model="*", requests="", total_tokens="", pricing_tier="auto"))
+
+    return UserDetail(
+        subkey=subkey,
+        friendly_name=profile["friendly_name"],
+        email=profile["email"],
+        description=profile["description"],
+        status=profile["status"],
+        revoke_reason=profile["revoke_reason"],
+        created_at=profile["created_at"],
+        requests=int(usage_totals["requests"]),
+        prompt_tokens=int(usage_totals["prompt_tokens"]),
+        completion_tokens=int(usage_totals["completion_tokens"]),
+        total_tokens=int(usage_totals["total_tokens"]),
+        usage_rows=usage_view,
+        monthly_requests=_chart_points([(row["usage_month"], int(row["requests"])) for row in monthly_rows]),
+        monthly_tokens=_chart_points([(row["usage_month"], int(row["total_tokens"])) for row in monthly_rows]),
+        quota_rows=quota_rows,
+        default_quota_label=_default_quota_label(quota_rules),
+    )
+
+
+def parse_int_field(value: str) -> Optional[int]:
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    parsed = int(cleaned)
+    if parsed < 0:
+        raise ValueError("Quota values must be zero or greater.")
+    return parsed
+
+
+def parse_quota_rows_from_form(values: Mapping[str, List[str]]) -> Dict[str, Dict[str, Any]]:
+    models = values.get("quota_model", [])
+    request_limits = values.get("quota_requests", [])
+    token_limits = values.get("quota_tokens", [])
+    pricing_tiers = values.get("quota_pricing_tier", [])
+
+    rules: Dict[str, Dict[str, Any]] = {}
+    total_rows = max(len(models), len(request_limits), len(token_limits), len(pricing_tiers))
+    for index in range(total_rows):
+        model = (models[index] if index < len(models) else "").strip()
+        requests_value = request_limits[index] if index < len(request_limits) else ""
+        tokens_value = token_limits[index] if index < len(token_limits) else ""
+        pricing_value = (pricing_tiers[index] if index < len(pricing_tiers) else "").strip().lower()
+
+        if not model and not requests_value.strip() and not tokens_value.strip():
+            continue
+        if not model:
+            raise ValueError("Every quota rule needs a model name. Use * for the default rule.")
+
+        limits: Dict[str, Any] = {}
+        requests_limit = parse_int_field(requests_value)
+        total_tokens_limit = parse_int_field(tokens_value)
+        if requests_limit is not None:
+            limits["requests"] = requests_limit
+        if total_tokens_limit is not None:
+            limits["total_tokens"] = total_tokens_limit
+        if pricing_value in {"auto", "free", "payg"}:
+            limits["pricing_tier"] = pricing_value
+
+        rules[model] = limits
+
+    return rules
+
+
+def create_user(
+    quota_manager: QuotaManager,
+    *,
+    friendly_name: str,
+    email: str,
+    description: str,
+    custom_subkey: str,
+    prefix: str,
+    quota_rules: Dict[str, Dict[str, Any]],
+) -> str:
+    name = friendly_name.strip()
+    if not name:
+        raise ValueError("Friendly name is required.")
+
+    quotas = quota_manager.snapshot_quotas()
+    subkey = custom_subkey.strip()
+    if not subkey:
+        subkey = generate_unique_subkey(quota_manager, prefix=prefix)
+    elif not is_valid_subkey(subkey):
+        raise ValueError("Custom subkeys may only contain letters, numbers, hyphens, and underscores.")
+
+    if is_subkey_known(quota_manager, subkey):
+        raise ValueError("That subkey already exists.")
+
+    quota_manager.upsert_subkey_profile(subkey, name, email.strip(), description.strip())
+    quota_manager.set_subkey_status(subkey, "active")
+
+    if quota_rules:
+        quotas[subkey] = quota_rules
+    persist_quotas(quota_manager, quotas)
+    return subkey
+
+
+def update_user_profile(
+    quota_manager: QuotaManager,
+    *,
+    subkey: str,
+    friendly_name: str,
+    email: str,
+    description: str,
+) -> None:
+    name = friendly_name.strip()
+    if not name:
+        raise ValueError("Friendly name is required.")
+    quota_manager.upsert_subkey_profile(subkey, name, email.strip(), description.strip())
+
+
+def update_user_status(
+    quota_manager: QuotaManager,
+    *,
+    subkey: str,
+    status: str,
+    revoke_reason: str,
+) -> None:
+    quota_manager.set_subkey_status(subkey, status, revoke_reason)
+
+
+def update_user_quotas(
+    quota_manager: QuotaManager,
+    *,
+    subkey: str,
+    quota_rules: Dict[str, Dict[str, Any]],
+) -> None:
+    quotas = quota_manager.snapshot_quotas()
+    if quota_rules:
+        quotas[subkey] = quota_rules
+    else:
+        quotas.pop(subkey, None)
+    persist_quotas(quota_manager, quotas)
+
+
+def persist_quotas(quota_manager: QuotaManager, quotas: Dict[str, Dict[str, Dict[str, Any]]]) -> None:
+    storage = get_quota_storage_status()
+    quota_manager.replace_quotas(quotas)
+    if storage.mode != "file" or not storage.path:
+        return
+
+    path = Path(storage.path)
+    if path.parent and not path.parent.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(quotas, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def is_subkey_known(quota_manager: QuotaManager, subkey: str) -> bool:
+    quotas = quota_manager.snapshot_quotas()
+    if subkey in quotas:
+        return True
+
+    with _connect(quota_manager.db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT 1
+            FROM (
+                SELECT subkey FROM usage
+                UNION
+                SELECT subkey FROM subkey_names
+                UNION
+                SELECT subkey FROM key_lifecycle
+            ) known
+            WHERE subkey=?
+            LIMIT 1
+            """,
+            (subkey,),
+        ).fetchone()
+    return row is not None
+
+
+def generate_unique_subkey(quota_manager: QuotaManager, prefix: str) -> str:
+    for _ in range(10):
+        candidate = generate_subkey(prefix=prefix)
+        if not is_subkey_known(quota_manager, candidate):
+            return candidate
+    raise ValueError("Failed to generate a unique subkey.")

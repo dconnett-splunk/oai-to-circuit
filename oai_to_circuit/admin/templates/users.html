@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="content-grid">
+  <article class="panel panel--form">
+    <div class="panel__head">
+      <div>
+        <p class="panel__eyebrow">Add user</p>
+        <h2>Create a managed key</h2>
+      </div>
+    </div>
+    <form method="post" action="/admin/users" class="stack-form">
+      <label>
+        <span>Friendly name</span>
+        <input type="text" name="friendly_name" placeholder="Team Alpha" required />
+      </label>
+      <label>
+        <span>Email</span>
+        <input type="email" name="email" placeholder="owner@example.com" />
+      </label>
+      <label>
+        <span>Description</span>
+        <textarea name="description" rows="3" placeholder="What this key is for"></textarea>
+      </label>
+      <div class="form-row">
+        <label>
+          <span>Prefix</span>
+          <input type="text" name="prefix" placeholder="team_alpha" />
+        </label>
+        <label>
+          <span>Custom subkey</span>
+          <input type="text" name="custom_subkey" placeholder="Optional exact key" />
+        </label>
+      </div>
+
+      <div class="quota-editor" data-quota-editor>
+        <div class="quota-editor__head">
+          <div>
+            <p class="panel__eyebrow">Quota rules</p>
+            <h3>Default rule plus overrides</h3>
+          </div>
+          <button type="button" class="button button--ghost" data-add-quota-row>Add rule</button>
+        </div>
+        <div class="quota-rows" data-quota-rows>
+          <div class="quota-row">
+            <input type="text" name="quota_model" value="*" placeholder="Model or *" />
+            <input type="number" min="0" name="quota_requests" placeholder="Requests" />
+            <input type="number" min="0" name="quota_tokens" placeholder="Total tokens" />
+            <select name="quota_pricing_tier">
+              <option value="auto" selected>auto</option>
+              <option value="free">free</option>
+              <option value="payg">payg</option>
+            </select>
+            <button type="button" class="button button--ghost" data-remove-quota-row>Remove</button>
+          </div>
+        </div>
+      </div>
+
+      <button type="submit" class="button">Create user</button>
+    </form>
+  </article>
+
+  <article class="panel">
+    <div class="panel__head">
+      <div>
+        <p class="panel__eyebrow">Users</p>
+        <h2>Managed access keys</h2>
+      </div>
+      <label class="search">
+        <span class="sr-only">Filter users</span>
+        <input type="search" placeholder="Filter by name, email, or subkey" data-user-filter />
+      </label>
+    </div>
+
+    {% if users %}
+    <div class="table-shell">
+      <table class="data-table" data-user-table>
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Status</th>
+            <th>Quota</th>
+            <th>Usage</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for user in users %}
+          <tr data-user-row>
+            <td>
+              <strong>{{ user.friendly_name }}</strong>
+              <p>{{ user.email or user.subkey }}</p>
+            </td>
+            <td>
+              <span class="status-badge status-badge--{{ user.status }}">{{ user.status }}</span>
+            </td>
+            <td>{{ user.quota_label }}</td>
+            <td>{{ "{:,}".format(user.requests) }} req / {{ "{:,}".format(user.total_tokens) }} tok</td>
+            <td><a href="/admin/users/{{ user.subkey | urlencode }}" class="panel__action">Open</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty-state">No users yet. Create the first managed key from the form.</p>
+    {% endif %}
+  </article>
+</section>
+
+<template id="quota-row-template">
+  <div class="quota-row">
+    <input type="text" name="quota_model" placeholder="Model or *" />
+    <input type="number" min="0" name="quota_requests" placeholder="Requests" />
+    <input type="number" min="0" name="quota_tokens" placeholder="Total tokens" />
+    <select name="quota_pricing_tier">
+      <option value="auto" selected>auto</option>
+      <option value="free">free</option>
+      <option value="payg">payg</option>
+    </select>
+    <button type="button" class="button button--ghost" data-remove-quota-row>Remove</button>
+  </div>
+</template>
+{% endblock %}
