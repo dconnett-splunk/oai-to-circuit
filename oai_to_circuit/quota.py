@@ -12,6 +12,7 @@ from oai_to_circuit.quota_config import (
     build_effective_user_map,
     empty_quota_config,
     normalize_quota_config,
+    resolve_model_limits,
     resolve_user_backend,
     resolve_user_rules,
 )
@@ -126,11 +127,7 @@ class QuotaManager:
 
     def _get_limits(self, subkey: str, model: str) -> Dict[str, Any]:
         effective_rules = resolve_user_rules(self.quota_config, subkey)
-        model_limits = (effective_rules.get(model) or {})
-        wildcard_limits = (effective_rules.get("*") or {})
-        combined: Dict[str, Any] = dict(wildcard_limits)
-        combined.update(model_limits)
-        return combined
+        return resolve_model_limits(effective_rules, model)
 
     def _get_usage(self, subkey: str, model: str) -> Tuple[int, int, int, int]:
         with self._connect() as conn:

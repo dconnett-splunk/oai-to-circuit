@@ -385,13 +385,13 @@ textarea {
   box-shadow: none;
 }
 
-.inline-toggle {
+.stack-form label.inline-toggle {
   display: flex;
   gap: 12px;
   align-items: flex-start;
 }
 
-.inline-toggle input {
+.stack-form label.inline-toggle input {
   width: auto;
   margin-top: 3px;
 }

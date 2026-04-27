@@ -151,3 +151,46 @@ def test_global_rules_templates_and_local_rules_merge_in_order():
         assert qm.will_exceed_tokens("tester", "gpt-4o-mini", next_total_tokens=500) is False
         assert qm.will_exceed_tokens("tester", "gpt-4o-mini", next_total_tokens=501) is True
         assert qm.get_pricing_tier("tester", "gpt-4o") == "payg"
+
+
+def test_glob_rule_matches_model_families():
+    quotas = {
+        "tester": {
+            "*": {"requests": 10},
+            "claude*": {"requests": 0},
+        }
+    }
+
+    with tempfile.NamedTemporaryFile() as tf:
+        qm = QuotaManager(db_path=tf.name, quotas=quotas)
+
+        assert qm.is_request_allowed("tester", "claude-sonnet-4") is False
+        assert qm.is_request_allowed("tester", "claude-opus-4") is False
+        assert qm.is_request_allowed("tester", "gpt-4o-mini") is True
+
+
+def test_regex_and_exact_rules_override_broader_patterns():
+    quotas = {
+        "tester": {
+            "*": {"requests": 100, "pricing_tier": "auto"},
+            "claude*": {"requests": 50, "pricing_tier": "free"},
+            "re:^claude-opus-\\d+$": {"requests": 0, "pricing_tier": "payg"},
+            "claude-opus-4": {"requests": 2},
+        }
+    }
+
+    with tempfile.NamedTemporaryFile() as tf:
+        qm = QuotaManager(db_path=tf.name, quotas=quotas)
+
+        assert qm.is_request_allowed("tester", "claude-haiku-4-5") is True
+        assert qm.get_pricing_tier("tester", "claude-haiku-4-5") == "free"
+
+        assert qm.is_request_allowed("tester", "claude-opus-5") is False
+        assert qm.get_pricing_tier("tester", "claude-opus-5") == "payg"
+
+        assert qm.is_request_allowed("tester", "claude-opus-4") is True
+        qm.record_usage("tester", "claude-opus-4", request_inc=1)
+        assert qm.is_request_allowed("tester", "claude-opus-4") is True
+        qm.record_usage("tester", "claude-opus-4", request_inc=1)
+        assert qm.is_request_allowed("tester", "claude-opus-4") is False
+        assert qm.get_pricing_tier("tester", "claude-opus-4") == "payg"

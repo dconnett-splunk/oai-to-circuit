@@ -1,3 +1,5 @@
+import fnmatch
+import re
 from copy import deepcopy
 from typing import Any, Dict, Optional
 
@@ -14,6 +16,7 @@ VALID_PRICING_TIERS = {"auto", "free", "payg"}
 
 QuotaRules = Dict[str, Dict[str, Any]]
 QuotaConfig = Dict[str, Any]
+REGEX_RULE_PREFIXES = ("re:", "regex:")
 
 
 def empty_quota_config() -> QuotaConfig:
@@ -64,6 +67,71 @@ def merge_rule_sets(base_rules: QuotaRules, override_rules: QuotaRules) -> Quota
         combined = dict(existing_limits)
         combined.update(deepcopy(limits))
         merged[model] = combined
+    return merged
+
+
+def _is_regex_rule(model_rule: str) -> bool:
+    lowered = model_rule.lower()
+    return any(lowered.startswith(prefix) for prefix in REGEX_RULE_PREFIXES)
+
+
+def _regex_pattern(model_rule: str) -> str:
+    lowered = model_rule.lower()
+    for prefix in REGEX_RULE_PREFIXES:
+        if lowered.startswith(prefix):
+            return model_rule[len(prefix):]
+    return model_rule
+
+
+def _is_glob_rule(model_rule: str) -> bool:
+    return model_rule != "*" and any(char in model_rule for char in "*?[")
+
+
+def _is_exact_rule(model_rule: str) -> bool:
+    return model_rule != "*" and not _is_regex_rule(model_rule) and not _is_glob_rule(model_rule)
+
+
+def _matches_model_rule(model_rule: str, model: str) -> bool:
+    if model_rule == "*":
+        return True
+    if _is_regex_rule(model_rule):
+        try:
+            return re.fullmatch(_regex_pattern(model_rule), model) is not None
+        except re.error:
+            return False
+    if _is_glob_rule(model_rule):
+        return fnmatch.fnmatchcase(model, model_rule)
+    return model_rule == model
+
+
+def _pattern_specificity(model_rule: str) -> tuple[int, int, int, str]:
+    if _is_regex_rule(model_rule):
+        pattern = _regex_pattern(model_rule)
+        literal_chars = sum(1 for char in pattern if char.isalnum() or char in "-_.")
+        return (literal_chars, len(pattern), 1, model_rule)
+
+    literal_chars = sum(1 for char in model_rule if char not in "*?[")
+    return (literal_chars, len(model_rule), 0, model_rule)
+
+
+def resolve_model_limits(quota_rules: Any, model: str) -> Dict[str, Any]:
+    normalized_rules = normalize_rule_map(quota_rules)
+    merged: Dict[str, Any] = dict(normalized_rules.get("*") or {})
+
+    pattern_matches = sorted(
+        (
+            model_rule
+            for model_rule in normalized_rules
+            if not _is_exact_rule(model_rule) and model_rule != "*" and _matches_model_rule(model_rule, model)
+        ),
+        key=_pattern_specificity,
+    )
+    for model_rule in pattern_matches:
+        merged.update(deepcopy(normalized_rules.get(model_rule) or {}))
+
+    if model in normalized_rules:
+        merged.update(deepcopy(normalized_rules.get(model) or {}))
+
     return merged
 
 

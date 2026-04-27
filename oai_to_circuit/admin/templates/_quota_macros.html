@@ -15,6 +15,10 @@
         <span>Applied to every model unless a named model row overrides it.</span>
       </div>
       <div class="quota-guide__item">
+        <strong>Globs and regex are supported</strong>
+        <span>Use patterns like <code>claude*</code> or <code>re:^claude-opus-.*$</code> to target model families.</span>
+      </div>
+      <div class="quota-guide__item">
         <strong><code>0</code> blocks a model</strong>
         <span>Set request cap to zero when that model should be completely unavailable.</span>
       </div>
@@ -35,8 +39,8 @@
       <div class="quota-row__grid">
         <label class="quota-field quota-field--model">
           <span class="quota-field__label">Model rule</span>
-          <input type="text" name="{{ prefix }}_model" value="{{ rule.model }}" list="supported-models" placeholder="* for default, or gpt-4o-mini" />
-          <small class="quota-field__hint"><code>*</code> applies to every model unless another row overrides it.</small>
+          <input type="text" name="{{ prefix }}_model" value="{{ rule.model }}" list="supported-models" placeholder="* for default, claude*, or re:^claude-opus-.*$" />
+          <small class="quota-field__hint"><code>*</code> applies to every model. Exact names, glob patterns, and <code>re:</code> regex rules can all override it.</small>
         </label>
         <label class="quota-field">
           <span class="quota-field__label">Request cap</span>
@@ -69,8 +73,8 @@
       <div class="quota-row__grid">
         <label class="quota-field quota-field--model">
           <span class="quota-field__label">Model rule</span>
-          <input type="text" name="{{ prefix }}_model" list="supported-models" placeholder="* for default, or gpt-4o-mini" />
-          <small class="quota-field__hint"><code>*</code> applies to every model unless another row overrides it.</small>
+          <input type="text" name="{{ prefix }}_model" list="supported-models" placeholder="* for default, claude*, or re:^claude-opus-.*$" />
+          <small class="quota-field__hint"><code>*</code> applies to every model. Exact names, glob patterns, and <code>re:</code> regex rules can all override it.</small>
         </label>
         <label class="quota-field">
           <span class="quota-field__label">Request cap</span>

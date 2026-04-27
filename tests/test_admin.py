@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 from fastapi.testclient import TestClient
 
 from oai_to_circuit.app import create_app
+from oai_to_circuit.admin.service import get_user_detail
 from oai_to_circuit.config import BackendConfig, BridgeConfig
 
 
@@ -94,6 +95,41 @@ def test_admin_pages_render_usage_views(tmp_path: Path, monkeypatch):
         assert "Observed activity and current limits" in detail.text
         assert "gpt-4o-mini" in detail.text
         assert "Primary admin user" in detail.text
+
+
+def test_admin_user_detail_resolves_pattern_rules_for_observed_models(tmp_path: Path, monkeypatch):
+    from oai_to_circuit import app as app_mod
+
+    quota_db = tmp_path / "quota.db"
+    monkeypatch.setattr(
+        app_mod,
+        "load_quotas_from_env_or_file",
+        lambda: {
+            "sk-alpha": {
+                "*": {"requests": 100},
+                "claude*": {"requests": 7},
+                "re:^claude-opus-\\d+$": {"requests": 2},
+            }
+        },
+    )
+
+    app = create_app(config=_make_test_config(quota_db_path=str(quota_db)))
+    with TestClient(app):
+        quota_manager = app.state.quota_manager
+        quota_manager.record_usage(
+            "sk-alpha",
+            "claude-opus-4",
+            request_inc=1,
+            prompt_tokens=10,
+            completion_tokens=20,
+            total_tokens=30,
+            usage_month="2026-04",
+        )
+        detail = get_user_detail(quota_manager, "sk-alpha")
+
+    assert detail is not None
+    assert detail.usage_rows[0].model == "claude-opus-4"
+    assert detail.usage_rows[0].requests_limit == 2
 
 
 def test_admin_clarifies_bootstrap_default_backend_labels(tmp_path: Path):

@@ -12,6 +12,7 @@ from oai_to_circuit.quota_config import (
     merge_rule_sets,
     normalize_quota_config,
     normalize_rule_map,
+    resolve_model_limits,
     resolve_user_rules,
     serialize_quota_config,
     template_usage_count,
@@ -226,10 +227,7 @@ def _quota_rows_from_rules(quota_rules: Mapping[str, Mapping[str, Any]]) -> List
 
 
 def _combined_limits(quota_rules: Mapping[str, Mapping[str, Any]], model: str) -> Tuple[Optional[int], Optional[int]]:
-    wildcard = quota_rules.get("*") or {}
-    specific = quota_rules.get(model) or {}
-    merged = dict(wildcard)
-    merged.update(specific)
+    merged = resolve_model_limits(quota_rules, model)
     requests_limit = merged.get("requests")
     tokens_limit = merged.get("total_tokens")
     return (

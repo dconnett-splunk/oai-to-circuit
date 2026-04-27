@@ -139,6 +139,11 @@ Rule precedence is:
 2. Optional template rules
 3. User-local overrides
 
+Within a single rule set, model matching precedence is:
+1. Exact model name
+2. Matching glob or `re:` regex rules
+3. `*` fallback
+
 Advanced quota files can now use a structured format:
 
 ```json
@@ -169,6 +174,12 @@ Advanced quota files can now use a structured format:
 
 The legacy flat `subkey -> rules` format still works and is treated as user-local rules without templates or global defaults.
 If a user omits `backend_id`, that subkey uses `CIRCUIT_DEFAULT_BACKEND`.
+
+Quota rule names support:
+- exact model names like `gpt-4o-mini`
+- globs like `claude*`
+- regex rules prefixed with `re:` like `re:^claude-opus-.*$`
+- the special catch-all `*`
 
 Backend config files written by the admin UI use a structured format:
 
