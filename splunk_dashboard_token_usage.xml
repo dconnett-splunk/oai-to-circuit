@@ -693,7 +693,7 @@
             <b>Key Rotation Support:</b> Users with rotated keys are aggregated by email for reporting continuity</li>
         </ul>
         <p>
-          <i>Note: Cost estimates are based on public OpenAI pricing and may not reflect actual Circuit API costs. Update pricing in pricing.py as needed.</i>
+          <i>Note: Cost estimates are based on the bridge's configured vendor pricing for OpenAI, Gemini, and Claude models and may not match Circuit billing exactly. Update pricing in pricing.py and this dashboard reference as needed.</i>
         </p>
         <p>
           <i><b>Key Rotation:</b> When keys are rotated, usage from all keys (old and new) is aggregated by email address. The "Keys" column shows how many keys a user has had. System events without email addresses are grouped by subkey.</i>
@@ -743,89 +743,111 @@
           <thead>
             <tr>
               <th>Tier</th>
-              <th>Model</th>
+              <th>Model / Invoke Value</th>
               <th>Requests/min</th>
               <th>Peak Tokens/min</th>
               <th>Input Cost (per 1M tokens)</th>
               <th>Completion Cost (per 1M tokens)</th>
-              <th>Notes</th>
+              <th>Quarterly / Notes</th>
             </tr>
           </thead>
           <tbody>
             <!-- Free Tier -->
             <tr class="tier-free">
               <td>
-                <b>Free</b>
+                <b>Free tier</b>
               </td>
-              <td>GPT-4o mini</td>
-              <td>30</td>
-              <td>200K</td>
-              <td>500M free/month</td>
-              <td>50M free/month</td>
-              <td>$0 quarterly</td>
-            </tr>
-            <tr class="tier-free">
-              <td>
-                <b>Free</b>
-              </td>
-              <td>GPT-4.1</td>
+              <td>Gemini 3.1 Flash Lite (gemini-3.1-flash-lite)</td>
               <td>15</td>
               <td>120K</td>
               <td>50M free/month</td>
               <td>5M free/month</td>
               <td>$0 quarterly</td>
             </tr>
+            <tr class="tier-free">
+              <td>
+                <b>Free tier</b>
+              </td>
+              <td>GPT-5-nano (gpt-5-nano)</td>
+              <td>15</td>
+              <td>120K</td>
+              <td>50M free/month</td>
+              <td>5M free/month</td>
+              <td>$0 quarterly</td>
+            </tr>
+            <tr class="tier-free">
+              <td>
+                <b>Free tier</b>
+              </td>
+              <td>GPT-4o mini (gpt-4o-mini)</td>
+              <td>30</td>
+              <td>200K</td>
+              <td>500M free/month</td>
+              <td>50M free/month</td>
+              <td>$0 quarterly; pricing sheet marks removal in Mar 2026</td>
+            </tr>
+            <tr class="tier-free">
+              <td>
+                <b>Free tier</b>
+              </td>
+              <td>GPT-4.1 (gpt-4.1)</td>
+              <td>15</td>
+              <td>120K</td>
+              <td>50M free/month</td>
+              <td>5M free/month</td>
+              <td>$0 quarterly; pricing sheet marks removal in Mar 2026</td>
+            </tr>
 
-            <!-- Pay-as-you-use Tier - Sorted by Completion Cost (Low to High) -->
+            <!-- Pay-as-you-use Tier -->
             <tr class="tier-payg">
               <td>
                 <b>Pay-as-you-use</b>
               </td>
-              <td>GPT-5-nano</td>
+              <td>GPT-4o (gpt-4o)</td>
               <td>Unlimited</td>
               <td>1M</td>
-              <td>$0.055</td>
-              <td>$0.44</td>
+              <td>$2.75</td>
+              <td>$11.00</td>
+              <td>Based on usage; pricing sheet marks removal in Mar 2026</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>GPT-4o mini (gpt-4o-mini)</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$0.165</td>
+              <td>$0.66</td>
               <td>Based on usage</td>
             </tr>
             <tr class="tier-payg">
               <td>
                 <b>Pay-as-you-use</b>
               </td>
-              <td>GPT-4o mini</td>
+              <td>GPT-4.1 (gpt-4.1)</td>
               <td>Unlimited</td>
               <td>1M</td>
-              <td>$0.15</td>
-              <td>$0.60</td>
-              <td>Based on usage</td>
-            </tr>
-            <tr class="tier-payg">
-              <td>
-                <b>Pay-as-you-use</b>
-              </td>
-              <td>GPT-5 mini</td>
-              <td>Unlimited</td>
-              <td>1M</td>
-              <td>$0.25</td>
               <td>$2.00</td>
+              <td>$8.00</td>
               <td>Based on usage</td>
             </tr>
             <tr class="tier-payg">
               <td>
                 <b>Pay-as-you-use</b>
               </td>
-              <td>Gemini 2.5 Flash Preview</td>
+              <td>GPT-4.1 mini (gpt-4.1-mini)</td>
               <td>Unlimited</td>
               <td>1M</td>
-              <td>$0.30</td>
-              <td>$2.50</td>
+              <td>$0.40</td>
+              <td>$1.60</td>
               <td>Based on usage</td>
             </tr>
             <tr class="tier-payg">
               <td>
                 <b>Pay-as-you-use</b>
               </td>
-              <td>GPT-o4 mini</td>
+              <td>GPT-o4 mini (o4-mini)</td>
               <td>Unlimited</td>
               <td>200K</td>
               <td>$1.10</td>
@@ -836,29 +858,7 @@
               <td>
                 <b>Pay-as-you-use</b>
               </td>
-              <td>Claude Haiku 4.5</td>
-              <td>Unlimited</td>
-              <td>200K</td>
-              <td>$1.10</td>
-              <td>$5.50</td>
-              <td>Based on usage</td>
-            </tr>
-            <tr class="tier-payg">
-              <td>
-                <b>Pay-as-you-use</b>
-              </td>
-              <td>GPT-4.1</td>
-              <td>Unlimited</td>
-              <td>1M</td>
-              <td>$2.00</td>
-              <td>$8.00</td>
-              <td>Based on usage</td>
-            </tr>
-            <tr class="tier-payg">
-              <td>
-                <b>Pay-as-you-use</b>
-              </td>
-              <td>GPT-o3</td>
+              <td>GPT-o3 (o3)</td>
               <td>Unlimited</td>
               <td>200K</td>
               <td>$2.00</td>
@@ -869,29 +869,7 @@
               <td>
                 <b>Pay-as-you-use</b>
               </td>
-              <td>GPT-4o</td>
-              <td>Unlimited</td>
-              <td>1M</td>
-              <td>$2.50</td>
-              <td>$10.00</td>
-              <td>Based on usage</td>
-            </tr>
-            <tr class="tier-payg">
-              <td>
-                <b>Pay-as-you-use</b>
-              </td>
-              <td>GPT-5 chat</td>
-              <td>Unlimited</td>
-              <td>120K</td>
-              <td>$1.25</td>
-              <td>$10.00</td>
-              <td>Based on usage</td>
-            </tr>
-            <tr class="tier-payg">
-              <td>
-                <b>Pay-as-you-use</b>
-              </td>
-              <td>GPT-5</td>
+              <td>GPT-5 (gpt-5)</td>
               <td>Unlimited</td>
               <td>270K</td>
               <td>$1.375</td>
@@ -902,18 +880,205 @@
               <td>
                 <b>Pay-as-you-use</b>
               </td>
-              <td>Gemini 2.5 Pro Exp</td>
+              <td>GPT-5-2 (gpt-5-2)</td>
               <td>Unlimited</td>
               <td>1M</td>
-              <td>$1.25 (&lt;200 tokens)<br/>$2.50 (&gt;200 tokens)</td>
-              <td>$10.00 (&lt;200 tokens)<br/>$15.00 (&gt;200 tokens)</td>
-              <td>Variable pricing</td>
+              <td>$1.75</td>
+              <td>$14.00</td>
+              <td>Based on usage</td>
             </tr>
             <tr class="tier-payg">
               <td>
                 <b>Pay-as-you-use</b>
               </td>
-              <td>Claude Sonnet 4</td>
+              <td>GPT-5-4 (gpt-5-4)</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$2.50</td>
+              <td>$15.00</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>GPT-5-4-mini (gpt-5-4-mini)</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$0.75</td>
+              <td>$4.15</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>GPT-5-4-nano (gpt-5-4-nano)</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$0.20</td>
+              <td>$1.25</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>GPT-5 mini (gpt-5-mini)</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$0.25</td>
+              <td>$2.00</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>GPT-5-nano (gpt-5-nano)</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$0.055</td>
+              <td>$0.44</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>GPT-5 chat (gpt-5-chat)</td>
+              <td>Unlimited</td>
+              <td>120K</td>
+              <td>$1.25</td>
+              <td>$10.00</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Gemini 2.5 Pro Exp (gemini-2.5-pro)</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$1.25 (&lt;200K prompt tokens)<br/>$2.50 (&gt;200K prompt tokens)</td>
+              <td>$10.00 (&lt;200K prompt tokens)<br/>$15.00 (&gt;200K prompt tokens)</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Gemini 2.5 Flash Preview (gemini-2.5-flash)</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$0.30</td>
+              <td>$2.50</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Gemini 3 Flash Preview (gemini-3-flash)</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$0.50</td>
+              <td>$3.00</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Gemini 3.1 Flash Lite (gemini-3.1-flash-lite)</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$0.25</td>
+              <td>$1.50</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Gemini 3 Pro (removed; no active invoke value)</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$2.00 (&lt;200K prompt tokens)<br/>$4.00 (&gt;200K prompt tokens)</td>
+              <td>$12.00 (&lt;200K prompt tokens)<br/>$18.00 (&gt;200K prompt tokens)</td>
+              <td>Deprecated / removed reference row</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Gemini 3.1 Pro (gemini-3.1-pro)</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$2.00 (&lt;200K prompt tokens)<br/>$4.00 (&gt;200K prompt tokens)</td>
+              <td>$12.00 (&lt;200K prompt tokens)<br/>$18.00 (&gt;200K prompt tokens)</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Gemini 2.5 Pro (websearch) (gemini-2.5-pro-web-search)</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$1.25 (&lt;200K prompt tokens)<br/>$2.50 (&gt;200K prompt tokens)</td>
+              <td>$10.00 (&lt;200K prompt tokens)<br/>$15.00 (&gt;200K prompt tokens)</td>
+              <td>+ $35 / 1K requests</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Gemini 2.5 Flash (websearch) (gemini-2.5-flash-web-search)</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$0.30</td>
+              <td>$2.50</td>
+              <td>+ $25 / 1K requests</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Gemini 3 Pro (websearch) (gemini-3-pro-web-search)</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$2.00 (&lt;200K prompt tokens)<br/>$4.00 (&gt;200K prompt tokens)</td>
+              <td>$12.00 (&lt;200K prompt tokens)<br/>$18.00 (&gt;200K prompt tokens)</td>
+              <td>+ $14 / 1K requests</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Gemini 3.1 Flash Lite (websearch) (gemini-3.1-flash-lite-web-search)</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$0.25</td>
+              <td>$1.50</td>
+              <td>+ $14 / 1K requests</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Gemini 3.1 Pro (websearch) (gemini-3.1-pro-web-search)</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$2.00 (&lt;200K prompt tokens)<br/>$4.00 (&gt;200K prompt tokens)</td>
+              <td>$12.00 (&lt;200K prompt tokens)<br/>$18.00 (&gt;200K prompt tokens)</td>
+              <td>+ $14 / 1K requests</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Claude Sonnet 4 (claude-sonnet-4)</td>
               <td>Unlimited</td>
               <td>1M</td>
               <td>$6.00</td>
@@ -924,7 +1089,7 @@
               <td>
                 <b>Pay-as-you-use</b>
               </td>
-              <td>Claude Sonnet 4.5</td>
+              <td>Claude Sonnet 4.5 (claude-sonnet-4-5)</td>
               <td>Unlimited</td>
               <td>1M</td>
               <td>$6.60</td>
@@ -935,7 +1100,18 @@
               <td>
                 <b>Pay-as-you-use</b>
               </td>
-              <td>Claude Opus 4.5</td>
+              <td>Claude Opus 4.1 (claude-opus-4-1)</td>
+              <td>Unlimited</td>
+              <td>200K</td>
+              <td>$15.00</td>
+              <td>$75.00</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Claude Opus 4.5 (claude-opus-4-5)</td>
               <td>Unlimited</td>
               <td>200K</td>
               <td>$5.00</td>
@@ -946,18 +1122,29 @@
               <td>
                 <b>Pay-as-you-use</b>
               </td>
-              <td>Claude Opus 4.1</td>
+              <td>Claude Opus 4.6 (claude-opus-4-6)</td>
+              <td>Unlimited</td>
+              <td>1M</td>
+              <td>$5.00</td>
+              <td>$25.00</td>
+              <td>Based on usage</td>
+            </tr>
+            <tr class="tier-payg">
+              <td>
+                <b>Pay-as-you-use</b>
+              </td>
+              <td>Claude Haiku 4.5 (claude-haiku-4-5)</td>
               <td>Unlimited</td>
               <td>200K</td>
-              <td>$15.00</td>
-              <td>$75.00</td>
+              <td>$1.10</td>
+              <td>$5.50</td>
               <td>Based on usage</td>
             </tr>
           </tbody>
         </table>
         <p style="margin-top: 15px;">
           <i>
-            <b>Note:</b> Pricing shown is for reference only. Actual costs may vary. Free tier models include monthly token allowances. Pay-as-you-use models are charged based on actual token consumption. Update pricing in pricing.py to match your specific Circuit API costs.</i>
+            <b>Note:</b> This reference table mirrors the bridge pricing configuration for active or explicitly tracked models. Free tier models include monthly token allowances, Gemini threshold models switch to higher pricing above 200K prompt tokens, and web-search variants add the listed per-1K-request surcharge. Deprecated or removed statuses reflect the supplied pricing sheet.</i>
         </p>
       </html>
     </panel>
