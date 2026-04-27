@@ -66,6 +66,7 @@ class UserSummary:
     model_count: int
     quota_label: str
     template_name: str
+    backend_id: str
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,7 @@ class UserDetail:
     effective_quota_label: str
     local_quota_label: str
     template_name: str
+    backend_id: str
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
@@ -349,7 +351,7 @@ def list_users_context(quota_manager: QuotaManager) -> Dict[str, Any]:
 
     for row in rows:
         subkey = row["subkey"]
-        user_entry = quota_config["users"].get(subkey) or {"template": "", "rules": {}}
+        user_entry = quota_config["users"].get(subkey) or {"template": "", "backend_id": "", "rules": {}}
         effective_rules = resolve_user_rules(quota_config, subkey)
         summaries[subkey] = UserSummary(
             subkey=subkey,
@@ -362,6 +364,7 @@ def list_users_context(quota_manager: QuotaManager) -> Dict[str, Any]:
             model_count=int(row["model_count"]),
             quota_label=_default_quota_label(effective_rules),
             template_name=user_entry.get("template") or "",
+            backend_id=user_entry.get("backend_id") or "",
         )
 
     for subkey, entry in quota_config["users"].items():
@@ -378,6 +381,7 @@ def list_users_context(quota_manager: QuotaManager) -> Dict[str, Any]:
                 model_count=0,
                 quota_label=_default_quota_label(resolve_user_rules(quota_config, subkey)),
                 template_name=entry.get("template") or "",
+                backend_id=entry.get("backend_id") or "",
             ),
         )
 
@@ -415,7 +419,7 @@ def build_policies_context(quota_manager: QuotaManager) -> Dict[str, Any]:
 
 def get_user_detail(quota_manager: QuotaManager, subkey: str) -> Optional[UserDetail]:
     quota_config = quota_manager.snapshot_quota_config()
-    user_entry = quota_config["users"].get(subkey) or {"template": "", "rules": {}}
+    user_entry = quota_config["users"].get(subkey) or {"template": "", "backend_id": "", "rules": {}}
     local_rules = normalize_rule_map(user_entry.get("rules"))
     effective_rules = resolve_user_rules(quota_config, subkey)
 
@@ -528,6 +532,7 @@ def get_user_detail(quota_manager: QuotaManager, subkey: str) -> Optional[UserDe
         effective_quota_label=_default_quota_label(effective_rules),
         local_quota_label=_default_quota_label(local_rules),
         template_name=user_entry.get("template") or "",
+        backend_id=user_entry.get("backend_id") or "",
     )
 
 
@@ -580,7 +585,14 @@ def _valid_template_name(name: str) -> bool:
 
 
 def _get_user_entry(config: QuotaConfig, subkey: str) -> Dict[str, Any]:
-    return config["users"].get(subkey) or {"template": "", "rules": {}}
+    return config["users"].get(subkey) or {"template": "", "backend_id": "", "rules": {}}
+
+
+def _normalize_backend_id(backend_id: str, available_backend_ids: Sequence[str]) -> str:
+    selected_backend_id = backend_id.strip()
+    if selected_backend_id and selected_backend_id not in set(available_backend_ids):
+        raise ValueError("Selected backend does not exist.")
+    return selected_backend_id
 
 
 def create_user(
@@ -592,6 +604,8 @@ def create_user(
     custom_subkey: str,
     prefix: str,
     template_name: str,
+    backend_id: str,
+    available_backend_ids: Sequence[str],
     quota_rules: Dict[str, Dict[str, Any]],
 ) -> str:
     name = friendly_name.strip()
@@ -602,6 +616,7 @@ def create_user(
     selected_template = template_name.strip()
     if selected_template and selected_template not in quota_config["templates"]:
         raise ValueError("Selected template does not exist.")
+    selected_backend_id = _normalize_backend_id(backend_id, available_backend_ids)
 
     subkey = custom_subkey.strip()
     if not subkey:
@@ -617,6 +632,7 @@ def create_user(
 
     quota_config["users"][subkey] = {
         "template": selected_template,
+        "backend_id": selected_backend_id,
         "rules": quota_rules,
     }
     persist_quotas(quota_manager, quota_config)
@@ -647,19 +663,23 @@ def update_user_status(
     quota_manager.set_subkey_status(subkey, status, revoke_reason)
 
 
-def update_user_template(
+def update_user_policy(
     quota_manager: QuotaManager,
     *,
     subkey: str,
     template_name: str,
+    backend_id: str,
+    available_backend_ids: Sequence[str],
 ) -> None:
     quota_config = quota_manager.snapshot_quota_config()
     selected_template = template_name.strip()
     if selected_template and selected_template not in quota_config["templates"]:
         raise ValueError("Selected template does not exist.")
+    selected_backend_id = _normalize_backend_id(backend_id, available_backend_ids)
 
     entry = dict(_get_user_entry(quota_config, subkey))
     entry["template"] = selected_template
+    entry["backend_id"] = selected_backend_id
     quota_config["users"][subkey] = entry
     persist_quotas(quota_manager, quota_config)
 
@@ -674,7 +694,7 @@ def update_user_quotas(
     entry = dict(_get_user_entry(quota_config, subkey))
     entry["rules"] = quota_rules
 
-    if entry.get("template") or quota_rules:
+    if entry.get("template") or entry.get("backend_id") or quota_rules:
         quota_config["users"][subkey] = entry
     else:
         quota_config["users"].pop(subkey, None)

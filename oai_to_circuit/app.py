@@ -142,20 +142,46 @@ def log_circuit_response(response: httpx.Response, logger: logging.Logger) -> Di
     return rate_limit_headers
 
 
+def resolve_backend_for_request(
+    *,
+    config: BridgeConfig,
+    quota_manager: Optional[QuotaManager],
+    caller_subkey: Optional[str],
+) -> Tuple[str, Any]:
+    assigned_backend_id = ""
+    if caller_subkey and quota_manager:
+        assigned_backend_id = quota_manager.get_subkey_backend_id(caller_subkey)
+
+    try:
+        return config.resolve_backend(assigned_backend_id)
+    except KeyError as exc:
+        unknown_backend_id = str(exc.args[0]) if exc.args else assigned_backend_id
+        raise HTTPException(
+            status_code=503,
+            detail=f"Subkey is assigned to unknown backend '{unknown_backend_id}'.",
+        )
+
+
 def create_app(*, config: BridgeConfig) -> FastAPI:
     logger = logging.getLogger("oai_to_circuit")
-    token_cache = TokenCache()
+    token_caches: Dict[str, TokenCache] = {
+        backend_id: TokenCache() for backend_id in config.configured_backends()
+    }
     quota_manager: Optional[QuotaManager] = None
     splunk_hec: Optional[SplunkHEC] = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         nonlocal quota_manager, splunk_hec
+        default_backend = config.default_backend()
+        configured_backends = config.configured_backends()
         logger.info("Starting OpenAI to Circuit Bridge server")
-        logger.info(f"Circuit base URL: {config.circuit_base}")
-        logger.info(f"API version: {config.api_version}")
-        logger.info(f"Credentials configured: {bool(config.circuit_client_id and config.circuit_client_secret)}")
-        logger.info(f"App key configured: {bool(config.circuit_appkey)}")
+        logger.info(f"Configured backends: {', '.join(configured_backends)}")
+        logger.info(f"Default backend: {config.default_backend_id}")
+        logger.info(f"Circuit base URL: {default_backend.circuit_base}")
+        logger.info(f"API version: {default_backend.api_version}")
+        logger.info(f"Credentials configured: {bool(default_backend.client_id and default_backend.client_secret)}")
+        logger.info(f"App key configured: {bool(default_backend.appkey)}")
 
         quotas_cfg = load_quotas_from_env_or_file()
         quota_manager = QuotaManager(db_path=config.quota_db_path, quotas=quotas_cfg)
@@ -176,11 +202,11 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
         )
         app.state.splunk_hec = splunk_hec
 
-        if not config.circuit_client_id:
+        if not default_backend.client_id:
             logger.warning("⚠️  Missing CIRCUIT_CLIENT_ID - authentication will fail!")
-        if not config.circuit_client_secret:
+        if not default_backend.client_secret:
             logger.warning("⚠️  Missing CIRCUIT_CLIENT_SECRET - authentication will fail!")
-        if not config.circuit_appkey:
+        if not default_backend.appkey:
             logger.warning("⚠️  Missing CIRCUIT_APPKEY - requests may be rejected by Circuit API!")
 
         yield
@@ -203,8 +229,10 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
         return {
             "status": "healthy",
             "service": "OpenAI to Circuit Bridge",
-            "credentials_configured": bool(config.circuit_client_id and config.circuit_client_secret),
-            "appkey_configured": bool(config.circuit_appkey),
+            "credentials_configured": bool(config.default_backend().client_id and config.default_backend().client_secret),
+            "appkey_configured": bool(config.default_backend().appkey),
+            "backends_configured": len(config.configured_backends()),
+            "default_backend_id": config.default_backend_id,
         }
 
     @app.options("/v1/chat/completions")
@@ -285,34 +313,42 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                             "x_forwarded_for": x_forwarded_for,
                         },
                     )
-                
+
                 raise HTTPException(status_code=429, detail="Quota exceeded for this subkey and model (requests)")
+
+        backend_id, backend = resolve_backend_for_request(
+            config=config,
+            quota_manager=quota_manager,
+            caller_subkey=caller_subkey,
+        )
+        token_cache = token_caches.setdefault(backend_id, TokenCache())
+        logger.info(f"Routing request through backend: {backend_id}")
 
         # Insert appkey if not present
         user_field = req_data.get("user")
         if not user_field:
-            if not config.circuit_appkey:
+            if not backend.appkey:
                 logger.warning("No CIRCUIT_APPKEY configured")
-            req_data["user"] = json.dumps({"appkey": config.circuit_appkey})
+            req_data["user"] = json.dumps({"appkey": backend.appkey})
             logger.debug("Added user field with appkey")
-        elif config.circuit_appkey and config.circuit_appkey not in user_field:
+        elif backend.appkey and backend.appkey not in user_field:
             try:
                 d = json.loads(user_field)
-                d["appkey"] = config.circuit_appkey
+                d["appkey"] = backend.appkey
                 req_data["user"] = json.dumps(d)
                 logger.debug("Injected appkey into existing user field")
             except Exception as e:
                 logger.warning(f"Failed to inject appkey into user field: {e}")
 
         target_url = (
-            f"{config.circuit_base}/openai/deployments/{model}/chat/completions?api-version={config.api_version}"
+            f"{backend.circuit_base}/openai/deployments/{model}/chat/completions?api-version={backend.api_version}"
         )
 
         try:
             access_token = await get_access_token(
-                token_url=config.token_url,
-                client_id=config.circuit_client_id,
-                client_secret=config.circuit_client_secret,
+                token_url=backend.token_url,
+                client_id=backend.client_id,
+                client_secret=backend.client_secret,
                 logger=logger,
                 cache=token_cache,
             )
@@ -401,6 +437,7 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                                 additional_fields = {
                                     "status_code": r.status_code,
                                     "success": r.status_code < 400,
+                                    "backend_id": backend_id,
                                     "client_ip": client_ip,
                                     "x_forwarded_for": x_forwarded_for,
                                     "is_streaming": True,
@@ -524,6 +561,7 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                     additional_fields = {
                         "status_code": r.status_code,
                         "success": r.status_code < 400,
+                        "backend_id": backend_id,
                         "client_ip": client_ip,
                         "x_forwarded_for": x_forwarded_for,
                         "is_streaming": False,

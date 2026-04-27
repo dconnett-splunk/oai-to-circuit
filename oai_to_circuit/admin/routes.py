@@ -19,10 +19,10 @@ from oai_to_circuit.admin.service import (
     list_users_context,
     parse_quota_rows_from_form,
     update_global_quotas,
+    update_user_policy,
     update_user_profile,
     update_user_quotas,
     update_user_status,
-    update_user_template,
     update_template,
 )
 from oai_to_circuit.config import BridgeConfig
@@ -59,6 +59,8 @@ def _render_context(
         "error": error,
         "quota_storage": get_quota_storage_status(),
         "model_suggestions": supported_model_suggestions(),
+        "backend_options": list(config.configured_backends().keys()),
+        "default_backend_id": config.default_backend_id,
         **context,
     }
 
@@ -151,6 +153,8 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
                 custom_subkey=(values.get("custom_subkey") or [""])[0],
                 prefix=(values.get("prefix") or [""])[0],
                 template_name=(values.get("template_name") or [""])[0],
+                backend_id=(values.get("backend_id") or [""])[0],
+                available_backend_ids=list(config.configured_backends().keys()),
                 quota_rules=quota_rules,
             )
         except ValueError as exc:
@@ -169,14 +173,16 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
         quota_manager = _require_quota_manager(request)
         values = await _form_values(request)
         try:
-            update_user_template(
+            update_user_policy(
                 quota_manager,
                 subkey=subkey,
                 template_name=(values.get("template_name") or [""])[0],
+                backend_id=(values.get("backend_id") or [""])[0],
+                available_backend_ids=list(config.configured_backends().keys()),
             )
         except ValueError as exc:
             return _redirect_to(f"/admin/users/{quote(subkey, safe='')}", error=str(exc))
-        return _redirect_to(f"/admin/users/{quote(subkey, safe='')}", notice="Policy template updated")
+        return _redirect_to(f"/admin/users/{quote(subkey, safe='')}", notice="Routing and policy updated")
 
     @router.post("/users/{subkey:path}/profile")
     async def admin_update_profile(request: Request, subkey: str):

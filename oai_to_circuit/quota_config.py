@@ -83,16 +83,18 @@ def _normalize_template_entry(name: str, entry: Any) -> Optional[Dict[str, Any]]
 
 def _normalize_user_entry(entry: Any) -> Dict[str, Any]:
     if not isinstance(entry, dict):
-        return {"template": "", "rules": {}}
+        return {"template": "", "backend_id": "", "rules": {}}
 
-    if "rules" in entry or "template" in entry:
+    if "rules" in entry or "template" in entry or "backend_id" in entry or "backend" in entry:
         template_name = str(entry.get("template") or "").strip()
+        backend_id = str(entry.get("backend_id") or entry.get("backend") or "").strip()
         rules = normalize_rule_map(entry.get("rules"))
     else:
         template_name = ""
+        backend_id = ""
         rules = normalize_rule_map(entry)
 
-    return {"template": template_name, "rules": rules}
+    return {"template": template_name, "backend_id": backend_id, "rules": rules}
 
 
 def normalize_quota_config(raw_config: Any) -> QuotaConfig:
@@ -147,9 +149,10 @@ def normalize_quota_config(raw_config: Any) -> QuotaConfig:
             continue
 
         legacy_entry = _normalize_user_entry(value)
-        existing = config[NORMALIZED_USERS_KEY].get(key) or {"template": "", "rules": {}}
+        existing = config[NORMALIZED_USERS_KEY].get(key) or {"template": "", "backend_id": "", "rules": {}}
         config[NORMALIZED_USERS_KEY][key] = {
             "template": existing.get("template") or legacy_entry.get("template") or "",
+            "backend_id": existing.get("backend_id") or legacy_entry.get("backend_id") or "",
             "rules": merge_rule_sets(existing.get("rules") or {}, legacy_entry.get("rules") or {}),
         }
 
@@ -158,7 +161,7 @@ def normalize_quota_config(raw_config: Any) -> QuotaConfig:
 
 def resolve_user_rules(config: QuotaConfig, subkey: str) -> QuotaRules:
     normalized = normalize_quota_config(config)
-    user_entry = normalized[NORMALIZED_USERS_KEY].get(subkey) or {"template": "", "rules": {}}
+    user_entry = normalized[NORMALIZED_USERS_KEY].get(subkey) or {"template": "", "backend_id": "", "rules": {}}
     rules = normalize_rule_map(normalized[NORMALIZED_GLOBAL_RULES_KEY])
 
     template_name = user_entry.get("template") or ""
@@ -168,6 +171,12 @@ def resolve_user_rules(config: QuotaConfig, subkey: str) -> QuotaRules:
 
     rules = merge_rule_sets(rules, user_entry.get("rules") or {})
     return rules
+
+
+def resolve_user_backend(config: QuotaConfig, subkey: str) -> str:
+    normalized = normalize_quota_config(config)
+    user_entry = normalized[NORMALIZED_USERS_KEY].get(subkey) or {"template": "", "backend_id": "", "rules": {}}
+    return str(user_entry.get("backend_id") or "").strip()
 
 
 def build_effective_user_map(config: QuotaConfig) -> Dict[str, QuotaRules]:
@@ -182,7 +191,10 @@ def quota_config_uses_advanced_sections(config: QuotaConfig) -> bool:
     normalized = normalize_quota_config(config)
     if normalized[NORMALIZED_GLOBAL_RULES_KEY] or normalized[NORMALIZED_TEMPLATES_KEY]:
         return True
-    return any((entry.get("template") or "").strip() for entry in normalized[NORMALIZED_USERS_KEY].values())
+    return any(
+        (entry.get("template") or "").strip() or (entry.get("backend_id") or "").strip()
+        for entry in normalized[NORMALIZED_USERS_KEY].values()
+    )
 
 
 def serialize_quota_config(config: QuotaConfig) -> Dict[str, Any]:
@@ -212,9 +224,15 @@ def serialize_quota_config(config: QuotaConfig) -> Dict[str, Any]:
         payload[USERS_KEY] = {}
         for subkey, entry in sorted(normalized[NORMALIZED_USERS_KEY].items()):
             template_name = (entry.get("template") or "").strip()
+            backend_id = (entry.get("backend_id") or "").strip()
             rules = deepcopy(entry.get("rules") or {})
-            if template_name:
-                payload[USERS_KEY][subkey] = {"template": template_name, "rules": rules}
+            if template_name or backend_id:
+                user_entry: Dict[str, Any] = {"rules": rules}
+                if template_name:
+                    user_entry["template"] = template_name
+                if backend_id:
+                    user_entry["backend_id"] = backend_id
+                payload[USERS_KEY][subkey] = user_entry
             else:
                 payload[USERS_KEY][subkey] = rules
 

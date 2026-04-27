@@ -12,6 +12,7 @@ from oai_to_circuit.quota_config import (
     build_effective_user_map,
     empty_quota_config,
     normalize_quota_config,
+    resolve_user_backend,
     resolve_user_rules,
 )
 
@@ -264,6 +265,10 @@ class QuotaManager:
             if not row:
                 return None, None
             return row[0], row[1]
+
+    def get_subkey_backend_id(self, subkey: str) -> str:
+        with self._lock:
+            return resolve_user_backend(self.quota_config, subkey)
 
     def snapshot_quotas(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
         with self._lock:
