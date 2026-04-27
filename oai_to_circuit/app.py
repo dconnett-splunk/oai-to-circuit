@@ -345,9 +345,9 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
             except Exception as e:
                 logger.warning(f"Failed to inject appkey into user field: {e}")
 
-        target_url = (
-            f"{backend.circuit_base}/openai/deployments/{model}/chat/completions?api-version={backend.api_version}"
-        )
+        target_url = f"{backend.circuit_base}/openai/deployments/{model}/chat/completions"
+        if backend.api_version.strip():
+            target_url = f"{target_url}?api-version={backend.api_version.strip()}"
 
         try:
             access_token = await get_access_token(

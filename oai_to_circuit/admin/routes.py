@@ -68,6 +68,7 @@ def _render_context(
         "model_suggestions": supported_model_suggestions(),
         "backend_options": list(current_config.configured_backends().keys()),
         "default_backend_id": current_config.default_backend_id,
+        "legacy_default_backend_active": current_config.legacy_default_backend_active,
         **context,
     }
 

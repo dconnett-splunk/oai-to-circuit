@@ -41,7 +41,8 @@
       </div>
       <label>
         <span>API version</span>
-        <input type="text" name="api_version" value="{{ backend_defaults.api_version }}" required />
+        <input type="text" name="api_version" placeholder="{{ backend_defaults.api_version }}" />
+        <small class="quota-field__hint">Optional. Leave blank to let Circuit use its current default API version.</small>
       </label>
       <label class="inline-toggle">
         <input type="checkbox" name="make_default" value="1" />
@@ -63,6 +64,9 @@
         <strong>Current default backend</strong>
         <code>{{ default_backend_id }}</code>
         <p>Users with no local backend assignment route here.</p>
+        {% if legacy_default_backend_active %}
+        <p>This default backend is currently being bootstrapped from <code>credentials.env</code> rather than a managed <code>backends.json</code> entry.</p>
+        {% endif %}
       </div>
       <div class="backend-summary__card">
         <strong>Persistence</strong>
@@ -98,9 +102,11 @@
           {% if backend.is_default %}
           <span class="pill">Current default</span>
           {% endif %}
+          <span class="pill">{{ backend.source_label }}</span>
           <span class="pill">{{ backend.assigned_users }} assigned user(s)</span>
         </div>
       </div>
+      <p class="panel__detail">{{ backend.source_detail }}</p>
 
       <form method="post" action="/admin/backends/{{ backend.backend_id | urlencode }}" class="stack-form">
         <div class="form-row">
@@ -129,7 +135,8 @@
         </div>
         <label>
           <span>API version</span>
-          <input type="text" name="api_version" value="{{ backend.api_version }}" required />
+          <input type="text" name="api_version" value="{{ backend.api_version }}" placeholder="{{ backend_defaults.api_version }}" />
+          <small class="quota-field__hint">Optional. Leave blank to let Circuit use its current default API version.</small>
         </label>
         <div class="button-row">
           <button type="submit" class="button">Save backend</button>

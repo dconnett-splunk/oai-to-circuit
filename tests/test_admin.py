@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -93,6 +94,22 @@ def test_admin_pages_render_usage_views(tmp_path: Path, monkeypatch):
         assert "Observed activity and current limits" in detail.text
         assert "gpt-4o-mini" in detail.text
         assert "Primary admin user" in detail.text
+
+
+def test_admin_clarifies_bootstrap_default_backend_labels(tmp_path: Path):
+    app = create_app(config=_make_test_config(quota_db_path=str(tmp_path / "quota.db")))
+    app.state.config = replace(app.state.config, legacy_default_backend_active=True)
+
+    with TestClient(app) as client:
+        backends_page = client.get("/admin/backends")
+        assert backends_page.status_code == 200
+        assert "credentials.env" in backends_page.text
+        assert "Bootstrap from credentials.env" in backends_page.text
+
+        users_page = client.get("/admin/users")
+        assert users_page.status_code == 200
+        assert "Inherit service default (default) from credentials.env" in users_page.text
+        assert "default (explicit assignment, credentials.env backend)" in users_page.text
 
 
 def test_admin_create_user_writes_quota_file_and_profile(tmp_path: Path, monkeypatch):
@@ -344,7 +361,7 @@ def test_admin_can_create_and_update_backends(tmp_path: Path, monkeypatch):
                     ("appkey", "appkey-b2"),
                     ("token_url", "https://example.invalid/token-b2"),
                     ("circuit_base", "https://example.invalid/b2"),
-                    ("api_version", "2025-06-01-preview"),
+                    ("api_version", ""),
                 ]
             ),
             headers={"content-type": "application/x-www-form-urlencoded"},
@@ -360,5 +377,6 @@ def test_admin_can_create_and_update_backends(tmp_path: Path, monkeypatch):
     assert stored_backends["_default_backend"] == "team-b"
     assert stored_backends["backends"]["team-b"]["client_id"] == "client-b2"
     assert stored_backends["backends"]["team-b"]["circuit_base"] == "https://example.invalid/b2"
+    assert stored_backends["backends"]["team-b"]["api_version"] == ""
     assert app.state.config.default_backend_id == "team-b"
-    assert app.state.config.configured_backends()["team-b"].api_version == "2025-06-01-preview"
+    assert app.state.config.configured_backends()["team-b"].api_version == ""

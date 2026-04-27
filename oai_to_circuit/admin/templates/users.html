@@ -45,12 +45,14 @@
       <label>
         <span>Backend</span>
         <select name="backend_id">
-          <option value="">Default backend ({{ default_backend_id }})</option>
+          <option value="">Inherit service default ({{ default_backend_id }}){% if legacy_default_backend_active %} from credentials.env{% endif %}</option>
           {% for backend_id in backend_options %}
-          <option value="{{ backend_id }}">{{ backend_id }}{% if backend_id == default_backend_id %} (default){% endif %}</option>
+          <option value="{{ backend_id }}">
+            {{ backend_id }}{% if backend_id == default_backend_id %} (explicit assignment{% if legacy_default_backend_active %}, credentials.env backend{% else %}, same target as current default{% endif %}){% endif %}
+          </option>
           {% endfor %}
         </select>
-        <small class="quota-field__hint">Choose which upstream Circuit credential set this user should use. Leave this on the default option unless the subkey needs to be routed elsewhere.</small>
+        <small class="quota-field__hint">Choose which upstream Circuit credential set this user should use. The inherit option follows whatever the service default is later changed to; the explicit default option pins this user to the current default backend.</small>
       </label>
 
       {{ quota_editor(

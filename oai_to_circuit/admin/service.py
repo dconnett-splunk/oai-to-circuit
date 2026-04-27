@@ -112,6 +112,8 @@ class BackendSummary:
     api_version: str
     assigned_users: int
     is_default: bool
+    source_label: str
+    source_detail: str
 
 
 @dataclass(frozen=True)
@@ -464,6 +466,7 @@ def build_policies_context(quota_manager: QuotaManager) -> Dict[str, Any]:
 
 def build_backends_context(config: BridgeConfig, quota_manager: QuotaManager) -> Dict[str, Any]:
     quota_config = quota_manager.snapshot_quota_config()
+    backend_storage = get_backend_storage_status()
     explicit_assignment_counts: Dict[str, int] = {}
     for entry in quota_config["users"].values():
         backend_id = str(entry.get("backend_id") or "").strip()
@@ -471,6 +474,7 @@ def build_backends_context(config: BridgeConfig, quota_manager: QuotaManager) ->
             explicit_assignment_counts[backend_id] = explicit_assignment_counts.get(backend_id, 0) + 1
 
     default_backend = config.default_backend()
+    managed_target = Path(backend_storage.path).name if backend_storage.path else "backends.json"
     backends = [
         BackendSummary(
             backend_id=backend_id,
@@ -482,6 +486,32 @@ def build_backends_context(config: BridgeConfig, quota_manager: QuotaManager) ->
             api_version=backend.api_version,
             assigned_users=explicit_assignment_counts.get(backend_id, 0),
             is_default=backend_id == config.default_backend_id,
+            source_label=(
+                "Bootstrap from credentials.env"
+                if config.legacy_default_backend_active and backend_id == config.default_backend_id
+                else (
+                    f"Managed in {managed_target}"
+                    if backend_storage.mode == "file"
+                    else (
+                        "Loaded from CIRCUIT_BACKENDS_JSON"
+                        if backend_storage.mode == "env"
+                        else "Runtime backend config"
+                    )
+                )
+            ),
+            source_detail=(
+                "This backend is currently coming from CIRCUIT_CLIENT_ID, CIRCUIT_CLIENT_SECRET, and CIRCUIT_APPKEY in credentials.env. Saving or adding managed backends will write it into backends.json."
+                if config.legacy_default_backend_active and backend_id == config.default_backend_id
+                else (
+                    "This backend is stored in the admin-managed backend file."
+                    if backend_storage.mode == "file"
+                    else (
+                        "This backend came from the inline CIRCUIT_BACKENDS_JSON environment variable."
+                        if backend_storage.mode == "env"
+                        else "This backend exists only in the running process until you configure a persistent backend file."
+                    )
+                )
+            ),
         )
         for backend_id, backend in sorted(config.configured_backends().items())
     ]
@@ -492,7 +522,8 @@ def build_backends_context(config: BridgeConfig, quota_manager: QuotaManager) ->
             "circuit_base": default_backend.circuit_base,
             "api_version": default_backend.api_version,
         },
-        "backend_storage": get_backend_storage_status(),
+        "backend_storage": backend_storage,
+        "legacy_default_backend_active": config.legacy_default_backend_active,
     }
 
 
@@ -700,7 +731,7 @@ def _build_backend_config_from_values(
         appkey=_required_backend_field(appkey, label="App key"),
         token_url=_required_backend_field(token_url, label="Token URL"),
         circuit_base=_required_backend_field(circuit_base, label="Circuit base URL"),
-        api_version=_required_backend_field(api_version, label="API version"),
+        api_version=api_version.strip(),
     )
 
 
@@ -914,6 +945,7 @@ def create_backend(
         config,
         default_backend_id=normalized_backend_id if make_default else config.default_backend_id,
         backend_configs=backend_configs,
+        legacy_default_backend_active=False,
     )
     persist_backends(updated_config)
     return updated_config
@@ -943,7 +975,7 @@ def update_backend(
         circuit_base=circuit_base,
         api_version=api_version,
     )
-    updated_config = replace(config, backend_configs=backend_configs)
+    updated_config = replace(config, backend_configs=backend_configs, legacy_default_backend_active=False)
     persist_backends(updated_config)
     return updated_config
 

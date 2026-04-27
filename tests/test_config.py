@@ -114,3 +114,31 @@ def test_load_config_reads_backends_from_file(tmp_path: Path, monkeypatch):
     assert cfg.default_backend_id == "team-b"
     assert set(cfg.configured_backends().keys()) == {"default", "team-b"}
     assert cfg.default_backend().circuit_base == "https://example.invalid/team-b"
+
+
+def test_load_config_preserves_blank_backend_api_version(tmp_path: Path, monkeypatch):
+    backend_file = tmp_path / "backends.json"
+    backend_file.write_text(
+        """
+        {
+          "_default_backend": "team-b",
+          "backends": {
+            "team-b": {
+              "client_id": "id-b",
+              "client_secret": "secret-b",
+              "appkey": "app-b",
+              "api_version": ""
+            }
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("CIRCUIT_BACKENDS_JSON", raising=False)
+    monkeypatch.delenv("CIRCUIT_DEFAULT_BACKEND", raising=False)
+    monkeypatch.setenv("CIRCUIT_BACKENDS_JSON_PATH", str(backend_file))
+
+    cfg = load_config()
+
+    assert cfg.default_backend_id == "team-b"
+    assert cfg.default_backend().api_version == ""

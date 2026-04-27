@@ -43,6 +43,7 @@ class BridgeConfig:
 
     default_backend_id: str = "default"
     backend_configs: Dict[str, BackendConfig] = field(default_factory=dict)
+    legacy_default_backend_active: bool = False
 
     def default_backend(self) -> BackendConfig:
         return self.configured_backends()[self.default_backend_id]
@@ -78,13 +79,16 @@ def _coerce_backend_value(raw_value: object) -> str:
 
 
 def _build_backend_config(raw_entry: Mapping[str, object], *, defaults: BackendConfig) -> BackendConfig:
+    api_version = defaults.api_version
+    if "api_version" in raw_entry:
+        api_version = _coerce_backend_value(raw_entry.get("api_version"))
     return BackendConfig(
         client_id=_coerce_backend_value(raw_entry.get("client_id") or raw_entry.get("circuit_client_id")) or defaults.client_id,
         client_secret=_coerce_backend_value(raw_entry.get("client_secret") or raw_entry.get("circuit_client_secret")) or defaults.client_secret,
         appkey=_coerce_backend_value(raw_entry.get("appkey") or raw_entry.get("circuit_appkey")) or defaults.appkey,
         token_url=_coerce_backend_value(raw_entry.get("token_url")) or defaults.token_url,
         circuit_base=_coerce_backend_value(raw_entry.get("circuit_base")) or defaults.circuit_base,
-        api_version=_coerce_backend_value(raw_entry.get("api_version")) or defaults.api_version,
+        api_version=api_version,
     )
 
 
@@ -93,20 +97,20 @@ def _load_backend_configs(
     raw_json: str,
     requested_default_backend_id: str,
     fallback_backend: BackendConfig,
-) -> tuple[str, Dict[str, BackendConfig]]:
+) -> tuple[str, Dict[str, BackendConfig], bool]:
     if not raw_json:
         default_backend_id = requested_default_backend_id or "default"
-        return default_backend_id, {default_backend_id: fallback_backend}
+        return default_backend_id, {default_backend_id: fallback_backend}, False
 
     try:
         payload = json.loads(raw_json)
     except Exception:
         default_backend_id = requested_default_backend_id or "default"
-        return default_backend_id, {default_backend_id: fallback_backend}
+        return default_backend_id, {default_backend_id: fallback_backend}, False
 
     if not isinstance(payload, dict):
         default_backend_id = requested_default_backend_id or "default"
-        return default_backend_id, {default_backend_id: fallback_backend}
+        return default_backend_id, {default_backend_id: fallback_backend}, False
 
     payload_default_backend_id = ""
     backend_payload = payload
@@ -128,14 +132,14 @@ def _load_backend_configs(
 
     if not backends:
         default_backend_id = requested_default_backend_id or "default"
-        return default_backend_id, {default_backend_id: fallback_backend}
+        return default_backend_id, {default_backend_id: fallback_backend}, False
 
     default_backend_id = requested_default_backend_id.strip() or payload_default_backend_id
     if default_backend_id and default_backend_id in backends:
-        return default_backend_id, backends
+        return default_backend_id, backends, True
     if "default" in backends:
-        return "default", backends
-    return next(iter(backends)), backends
+        return "default", backends, True
+    return next(iter(backends)), backends, True
 
 
 def serialize_backend_configs(
@@ -191,7 +195,7 @@ def load_config() -> BridgeConfig:
         circuit_base=circuit_base,
         api_version=api_version,
     )
-    default_backend_id, backend_configs = _load_backend_configs(
+    default_backend_id, backend_configs, has_managed_backends = _load_backend_configs(
         raw_json=_load_backend_json_from_env_or_file(),
         requested_default_backend_id=os.environ.get("CIRCUIT_DEFAULT_BACKEND", "").strip(),
         fallback_backend=fallback_backend,
@@ -206,6 +210,7 @@ def load_config() -> BridgeConfig:
         api_version=api_version,
         default_backend_id=default_backend_id,
         backend_configs=backend_configs,
+        legacy_default_backend_active=not has_managed_backends,
         quota_db_path=os.environ.get("QUOTA_DB_PATH", "quota.db"),
         require_subkey=os.environ.get("REQUIRE_SUBKEY", "true").lower() in ("1", "true", "yes"),
         splunk_hec_url=os.environ.get("SPLUNK_HEC_URL", ""),

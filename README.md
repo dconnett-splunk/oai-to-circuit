@@ -196,6 +196,8 @@ Backend config files written by the admin UI use a structured format:
 }
 ```
 
+`api_version` is optional for managed backends. If you leave it blank in the admin UI, the bridge omits the query parameter and lets Circuit use its current default API version.
+
 The packaged installer creates `/etc/oai-to-circuit/backends.json` from `backends.json.example`, which starts as `{}` so the bridge can continue using the legacy single-backend env vars until you add or edit backends in the admin UI.
 
 For any non-local deployment, set `ADMIN_PASSWORD` so the admin routes require HTTP Basic auth.
