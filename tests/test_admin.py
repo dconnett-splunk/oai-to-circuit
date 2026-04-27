@@ -81,6 +81,8 @@ def test_admin_pages_render_usage_views(tmp_path: Path, monkeypatch):
         assert users.status_code == 200
         assert "Managed access keys" in users.text
         assert "alpha@example.com" in users.text
+        assert 'datalist id="supported-models"' in users.text
+        assert 'value="gpt-4o-mini"' in users.text
 
         detail = client.get("/admin/users/sk-alpha")
         assert detail.status_code == 200

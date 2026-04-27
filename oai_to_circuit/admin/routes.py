@@ -26,6 +26,7 @@ from oai_to_circuit.admin.service import (
     update_template,
 )
 from oai_to_circuit.config import BridgeConfig
+from oai_to_circuit.pricing import supported_model_suggestions
 from oai_to_circuit.quota import QuotaManager
 
 
@@ -57,6 +58,7 @@ def _render_context(
         "notice": notice,
         "error": error,
         "quota_storage": get_quota_storage_status(),
+        "model_suggestions": supported_model_suggestions(),
         **context,
     }
 

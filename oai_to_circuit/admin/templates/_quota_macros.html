@@ -33,9 +33,9 @@
     {% for rule in rows %}
     <div class="quota-row">
       <div class="quota-row__grid">
-        <label class="quota-field">
+        <label class="quota-field quota-field--model">
           <span class="quota-field__label">Model rule</span>
-          <input type="text" name="{{ prefix }}_model" value="{{ rule.model }}" placeholder="* for default, or gpt-4o-mini" />
+          <input type="text" name="{{ prefix }}_model" value="{{ rule.model }}" list="supported-models" placeholder="* for default, or gpt-4o-mini" />
           <small class="quota-field__hint"><code>*</code> applies to every model unless another row overrides it.</small>
         </label>
         <label class="quota-field">
@@ -67,9 +67,9 @@
   <template data-quota-row-template>
     <div class="quota-row">
       <div class="quota-row__grid">
-        <label class="quota-field">
+        <label class="quota-field quota-field--model">
           <span class="quota-field__label">Model rule</span>
-          <input type="text" name="{{ prefix }}_model" placeholder="* for default, or gpt-4o-mini" />
+          <input type="text" name="{{ prefix }}_model" list="supported-models" placeholder="* for default, or gpt-4o-mini" />
           <small class="quota-field__hint"><code>*</code> applies to every model unless another row overrides it.</small>
         </label>
         <label class="quota-field">

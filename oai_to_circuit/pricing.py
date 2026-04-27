@@ -152,6 +152,35 @@ MODEL_ALIASES: Dict[str, str] = {
     "claude-haiku-4.5": "claude-haiku-4-5",
 }
 
+PREFERRED_MODEL_ORDER: List[str] = [
+    "gpt-4.1",
+    "gpt-4o-mini",
+    "gpt-4o",
+    "o4-mini",
+    "o3",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gpt-5",
+    "gpt-5-mini",
+    "gpt-5-nano",
+    "claude-sonnet-4",
+    "claude-opus-4-1",
+]
+
+
+def supported_model_suggestions() -> List[str]:
+    """Return canonical model names for UI suggestion lists."""
+    suggestions: List[str] = []
+    seen = set()
+
+    for model in PREFERRED_MODEL_ORDER + sorted(MODEL_PRICING):
+        if model in seen or model not in MODEL_PRICING:
+            continue
+        suggestions.append(model)
+        seen.add(model)
+
+    return suggestions
+
 
 def normalize_model_name(model: str) -> str:
     """Normalize model aliases to canonical deployment names."""

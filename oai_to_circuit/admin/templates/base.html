@@ -41,6 +41,12 @@
       <section class="flash flash--error">{{ error }}</section>
       {% endif %}
 
+      <datalist id="supported-models">
+        {% for model_name in model_suggestions %}
+        <option value="{{ model_name }}"></option>
+        {% endfor %}
+      </datalist>
+
       {% block content %}{% endblock %}
     </div>
   </body>

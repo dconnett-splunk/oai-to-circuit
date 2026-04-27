@@ -457,6 +457,10 @@ textarea {
   align-content: start;
 }
 
+.quota-field--model {
+  grid-column: 1 / -1;
+}
+
 .quota-field__label {
   font-size: 0.95rem;
   font-weight: 700;
