@@ -37,7 +37,14 @@ cp -r "$INSTALL_DIR" "$BACKUP_DIR"
 
 # Copy updated files
 echo "   Copying Python modules..."
+mkdir -p "$INSTALL_DIR/oai_to_circuit"
 cp -r oai_to_circuit/*.py "$INSTALL_DIR/oai_to_circuit/"
+
+if [ -d "oai_to_circuit/admin" ]; then
+    echo "   Copying admin package and assets..."
+    mkdir -p "$INSTALL_DIR/oai_to_circuit/admin"
+    cp -r oai_to_circuit/admin/* "$INSTALL_DIR/oai_to_circuit/admin/"
+fi
 
 echo "   Copying utility scripts..."
 cp rewriter.py "$INSTALL_DIR/" 2>/dev/null || true
@@ -76,4 +83,3 @@ echo ""
 echo "Backup saved at: $BACKUP_DIR"
 echo "To rollback: sudo cp -r $BACKUP_DIR/* $INSTALL_DIR/ && sudo systemctl restart $SERVICE_NAME"
 echo ""
-

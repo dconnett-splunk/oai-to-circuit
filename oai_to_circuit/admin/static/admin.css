@@ -376,7 +376,7 @@ textarea {
 
 .quota-editor {
   display: grid;
-  gap: 14px;
+  gap: 16px;
 }
 
 .quota-editor__head {
@@ -386,16 +386,99 @@ textarea {
   align-items: center;
 }
 
+.quota-editor__intro {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(15, 139, 141, 0.06);
+  border: 1px solid rgba(15, 139, 141, 0.14);
+}
+
+.quota-editor__summary,
+.quota-editor__example {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.quota-guide {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.quota-guide__item {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(25, 48, 72, 0.12);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.quota-guide__item strong {
+  font-size: 0.98rem;
+}
+
+.quota-guide__item span,
+.quota-field__hint {
+  color: var(--muted);
+}
+
 .quota-rows {
   display: grid;
-  gap: 10px;
+  gap: 14px;
 }
 
 .quota-row {
   display: grid;
-  gap: 10px;
-  grid-template-columns: 1.4fr 1fr 1fr minmax(92px, 0.8fr) auto;
-  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(25, 48, 72, 0.12);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.quota-row__grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.quota-field {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.quota-field__label {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.quota-field__hint {
+  line-height: 1.45;
+  font-size: 0.88rem;
+}
+
+.quota-row__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.quota-row input,
+.quota-row select {
+  min-height: 50px;
+  padding: 14px 16px;
+}
+
+.quota-editor code,
+.quota-field__hint code {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(15, 139, 141, 0.1);
+  color: var(--accent-strong);
 }
 
 .user-hero {
@@ -475,7 +558,8 @@ textarea {
   .panel-grid,
   .content-grid,
   .form-row,
-  .quota-row,
+  .quota-row__grid,
+  .quota-guide,
   .user-hero {
     grid-template-columns: 1fr;
     flex-direction: column;
