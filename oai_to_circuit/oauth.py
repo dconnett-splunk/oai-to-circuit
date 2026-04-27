@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import base64
 import time
 from dataclasses import dataclass
@@ -66,5 +68,4 @@ async def get_access_token(
     except Exception:
         logger.exception("Error getting access token")
         raise
-
 
