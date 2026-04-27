@@ -6,6 +6,7 @@ from typing import Any, AsyncIterator, Dict, Optional, Tuple
 
 import httpx
 from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from oai_to_circuit.config import BridgeConfig
@@ -122,6 +123,24 @@ def build_billing_context(
     return billing_month, billing
 
 
+def log_circuit_response(response: httpx.Response, logger: logging.Logger) -> Dict[str, str]:
+    """Log upstream response metadata and return any rate-limit headers."""
+    logger.debug(f"[CIRCUIT RESPONSE] Status: {response.status_code}")
+    logger.debug(f"[CIRCUIT RESPONSE] Content-Type: {response.headers.get('content-type')}")
+    logger.debug(f"[CIRCUIT RESPONSE] All headers: {dict(response.headers)}")
+
+    rate_limit_headers = {
+        key: value
+        for key, value in response.headers.items()
+        if "ratelimit" in key.lower() or "rate-limit" in key.lower()
+    }
+    if rate_limit_headers:
+        logger.info(f"[CIRCUIT RATE LIMITS] {rate_limit_headers}")
+    else:
+        logger.debug("[CIRCUIT RATE LIMITS] No rate limit headers found")
+    return rate_limit_headers
+
+
 def create_app(*, config: BridgeConfig) -> FastAPI:
     logger = logging.getLogger("oai_to_circuit")
     token_cache = TokenCache()
@@ -165,6 +184,12 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
         logger.info("Shutting down OpenAI to Circuit Bridge server")
 
     app = FastAPI(title="OpenAI to Circuit Bridge", version="1.0.0", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["POST", "OPTIONS"],
+        allow_headers=["*"],
+    )
 
     @app.get("/health")
     async def health_check():
@@ -174,6 +199,10 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
             "credentials_configured": bool(config.circuit_client_id and config.circuit_client_secret),
             "appkey_configured": bool(config.circuit_appkey),
         }
+
+    @app.options("/v1/chat/completions")
+    async def chat_completion_options():
+        return Response(status_code=204)
 
     @app.post("/v1/chat/completions")
     async def chat_completion(request: Request):
@@ -297,255 +326,249 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
         logger.debug(f"[REQUEST TYPE] Streaming request: {is_streaming_request}")
 
         try:
-            async with httpx.AsyncClient(timeout=90) as client:
-                r = await client.post(target_url, json=req_data, headers=headers)
-            
-            # Diagnostic logging for Circuit API response
-            logger.debug(f"[CIRCUIT RESPONSE] Status: {r.status_code}")
-            logger.debug(f"[CIRCUIT RESPONSE] Content-Type: {r.headers.get('content-type')}")
-            logger.debug(f"[CIRCUIT RESPONSE] All headers: {dict(r.headers)}")
-            
-            # Look for rate limit headers specifically
-            rate_limit_headers = {k: v for k, v in r.headers.items() if 'ratelimit' in k.lower() or 'rate-limit' in k.lower()}
-            if rate_limit_headers:
-                logger.info(f"[CIRCUIT RATE LIMITS] {rate_limit_headers}")
-            else:
-                logger.debug("[CIRCUIT RATE LIMITS] No rate limit headers found")
-            
-            # Check if response is streaming
-            ct = (r.headers.get("content-type") or "").lower()
-            is_streaming_response = "text/event-stream" in ct or "stream" in ct
-            
-            if is_streaming_response:
-                # Handle streaming response
-                logger.info(f"[STREAMING RESPONSE] Detected streaming response, will parse SSE")
-                
-                # Create async generator that parses SSE and forwards chunks
-                async def stream_with_usage_tracking():
-                    collected_usage: Optional[Dict[str, int]] = None
-                    
-                    # Re-open the stream
-                    async with httpx.AsyncClient(timeout=90) as stream_client:
-                        async with stream_client.stream("POST", target_url, json=req_data, headers=headers) as stream_response:
-                            async for chunk_bytes, usage in parse_sse_stream(stream_response, logger):
+            if is_streaming_request:
+                upstream_client = httpx.AsyncClient(timeout=90)
+                request_obj = upstream_client.build_request("POST", target_url, json=req_data, headers=headers)
+                try:
+                    r = await upstream_client.send(request_obj, stream=True)
+                except Exception:
+                    await upstream_client.aclose()
+                    raise
+
+                rate_limit_headers = log_circuit_response(r, logger)
+                ct = (r.headers.get("content-type") or "").lower()
+                is_streaming_response = "text/event-stream" in ct or "stream" in ct
+
+                if is_streaming_response:
+                    logger.info("[STREAMING RESPONSE] Detected streaming response, will parse SSE")
+                    response_content_type = r.headers.get("content-type", "text/event-stream")
+
+                    async def stream_with_usage_tracking():
+                        collected_usage: Optional[Dict[str, int]] = None
+                        try:
+                            async for chunk_bytes, usage in parse_sse_stream(r, logger):
                                 if usage:
                                     collected_usage = usage
                                 if chunk_bytes:
                                     yield chunk_bytes
-                    
-                    # After stream completes, record usage
-                    if caller_subkey and quota_manager and collected_usage:
-                        prompt_tokens = collected_usage.get("prompt_tokens", 0)
-                        completion_tokens = collected_usage.get("completion_tokens", 0)
-                        total_tokens = collected_usage.get("total_tokens", 0)
-                        
-                        logger.info(f"[STREAMING] Recording usage: prompt={prompt_tokens}, completion={completion_tokens}, total={total_tokens}")
-                        usage_month, billing = build_billing_context(
-                            quota_manager=quota_manager,
-                            subkey=caller_subkey,
-                            model=model,
-                            prompt_tokens=prompt_tokens,
-                            completion_tokens=completion_tokens,
-                            request_count=1,
-                        )
-                        estimated_cost = float(billing["estimated_cost_usd"])
-                        cost_known = bool(billing["pricing_known"])
-                        if cost_known:
-                            logger.debug(
-                                f"[COST] Estimated cost for streaming request: ${estimated_cost:.6f} "
-                                f"(tier={billing['pricing_tier']}, payg=${billing['estimated_payg_cost_usd']:.6f})"
+                        finally:
+                            await r.aclose()
+                            await upstream_client.aclose()
+
+                        if caller_subkey and quota_manager and collected_usage:
+                            prompt_tokens = collected_usage.get("prompt_tokens", 0)
+                            completion_tokens = collected_usage.get("completion_tokens", 0)
+                            total_tokens = collected_usage.get("total_tokens", 0)
+
+                            logger.info(
+                                f"[STREAMING] Recording usage: prompt={prompt_tokens}, completion={completion_tokens}, total={total_tokens}"
                             )
-                        
-                        quota_manager.record_usage(
-                            subkey=caller_subkey,
-                            model=model,
-                            request_inc=1,
-                            prompt_tokens=prompt_tokens,
-                            completion_tokens=completion_tokens,
-                            total_tokens=total_tokens,
-                            usage_month=usage_month,
-                        )
-                        
-                        # Send usage event to Splunk HEC
-                        if splunk_hec:
-                            friendly_name, email = quota_manager.get_name_and_email(caller_subkey)
-                            
-                            # Prepare additional fields with cost and rate limits
-                            additional_fields = {
-                                "status_code": r.status_code,
-                                "success": r.status_code < 400,
-                                "client_ip": client_ip,
-                                "x_forwarded_for": x_forwarded_for,
-                                "is_streaming": True,
-                                "cost_known": cost_known,
-                                "pricing_model": billing["pricing_model"],
-                                "pricing_tier_mode": billing["pricing_tier_mode"],
-                                "pricing_tier": billing["pricing_tier"],
-                                "free_tier_eligible": billing["free_tier_eligible"],
-                                "billing_period_month": billing["billing_period_month"],
-                                "free_tier_prompt_included": billing["free_tier_prompt_included"],
-                                "free_tier_completion_included": billing["free_tier_completion_included"],
-                                "monthly_prompt_tokens_before_request": billing["monthly_prompt_tokens_before_request"],
-                                "monthly_completion_tokens_before_request": billing["monthly_completion_tokens_before_request"],
-                                "monthly_prompt_tokens_after_request": billing["monthly_prompt_tokens_after_request"],
-                                "monthly_completion_tokens_after_request": billing["monthly_completion_tokens_after_request"],
-                                "free_prompt_tokens_applied": billing["free_prompt_tokens_applied"],
-                                "free_completion_tokens_applied": billing["free_completion_tokens_applied"],
-                                "billable_prompt_tokens": billing["billable_prompt_tokens"],
-                                "billable_completion_tokens": billing["billable_completion_tokens"],
-                                "payg_prompt_rate_per_million": billing["payg_prompt_rate_per_million"],
-                                "payg_completion_rate_per_million": billing["payg_completion_rate_per_million"],
-                                "estimated_payg_cost_usd": billing["estimated_payg_cost_usd"],
-                                "request_surcharge_usd": billing["request_surcharge_usd"],
-                            }
-                            
-                            if cost_known:
-                                additional_fields["estimated_cost_usd"] = estimated_cost
-                            
-                            # Add rate limit info if available
-                            if rate_limit_headers:
-                                additional_fields["circuit_rate_limits"] = rate_limit_headers
-                            
-                            splunk_hec.send_usage_event(
+                            usage_month, billing = build_billing_context(
+                                quota_manager=quota_manager,
                                 subkey=caller_subkey,
                                 model=model,
-                                requests=1,
+                                prompt_tokens=prompt_tokens,
+                                completion_tokens=completion_tokens,
+                                request_count=1,
+                            )
+                            estimated_cost = float(billing["estimated_cost_usd"])
+                            cost_known = bool(billing["pricing_known"])
+                            if cost_known:
+                                logger.debug(
+                                    f"[COST] Estimated cost for streaming request: ${estimated_cost:.6f} "
+                                    f"(tier={billing['pricing_tier']}, payg=${billing['estimated_payg_cost_usd']:.6f})"
+                                )
+
+                            quota_manager.record_usage(
+                                subkey=caller_subkey,
+                                model=model,
+                                request_inc=1,
                                 prompt_tokens=prompt_tokens,
                                 completion_tokens=completion_tokens,
                                 total_tokens=total_tokens,
-                                additional_fields=additional_fields,
-                                friendly_name=friendly_name,
-                                email=email,
+                                usage_month=usage_month,
                             )
-                    elif caller_subkey and quota_manager:
-                        logger.warning("[STREAMING] No usage data collected from stream")
-                
-                return StreamingResponse(
-                    stream_with_usage_tracking(),
-                    status_code=r.status_code,
-                    headers={"Content-Type": r.headers.get("content-type", "text/event-stream")},
-                    media_type=r.headers.get("content-type", "text/event-stream")
-                )
-            
-            else:
-                # Handle non-streaming response
-                logger.debug(f"[NON-STREAMING RESPONSE] Processing JSON response")
-                if "application/json" in ct and r.content:
-                    logger.debug(f"[NON-STREAMING RESPONSE] Full JSON response: {r.text}")
-                
-                if caller_subkey and quota_manager:
-                    prompt_tokens = 0
-                    completion_tokens = 0
-                    total_tokens = 0
-                    try:
-                        if "application/json" in ct and r.content:
-                            payload = r.json()
-                            usage = payload.get("usage") if isinstance(payload, dict) else None
-                            if isinstance(usage, dict):
-                                prompt_tokens = int(usage.get("prompt_tokens") or 0)
-                                completion_tokens = int(usage.get("completion_tokens") or 0)
-                                total_tokens = int(usage.get("total_tokens") or (prompt_tokens + completion_tokens))
-                                logger.debug(f"[TOKEN EXTRACTION] Successfully extracted tokens: prompt={prompt_tokens}, completion={completion_tokens}, total={total_tokens}")
-                            else:
-                                logger.debug(f"[TOKEN EXTRACTION] No usage dict found in response payload")
-                        else:
-                            logger.debug(f"[TOKEN EXTRACTION] Skipped - Content-Type: {ct}, has_content: {bool(r.content)}")
-                    except Exception as e:
-                        logger.warning(
-                            f"[TOKEN EXTRACTION] Failed to extract token usage from response: {type(e).__name__}: {e}. "
-                            f"Content-Type: {ct}, Status: {r.status_code}, "
-                            f"Has content: {bool(r.content)}"
-                        )
-                        logger.debug(f"[TOKEN EXTRACTION] Response body that failed to parse: {r.text[:500] if r.text else 'empty'}")
-                    
-                    # Calculate cost
-                    usage_month, billing = build_billing_context(
-                        quota_manager=quota_manager,
-                        subkey=caller_subkey,
-                        model=model,
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=completion_tokens,
-                        request_count=1,
+
+                            if splunk_hec:
+                                friendly_name, email = quota_manager.get_name_and_email(caller_subkey)
+                                additional_fields = {
+                                    "status_code": r.status_code,
+                                    "success": r.status_code < 400,
+                                    "client_ip": client_ip,
+                                    "x_forwarded_for": x_forwarded_for,
+                                    "is_streaming": True,
+                                    "cost_known": cost_known,
+                                    "pricing_model": billing["pricing_model"],
+                                    "pricing_tier_mode": billing["pricing_tier_mode"],
+                                    "pricing_tier": billing["pricing_tier"],
+                                    "free_tier_eligible": billing["free_tier_eligible"],
+                                    "billing_period_month": billing["billing_period_month"],
+                                    "free_tier_prompt_included": billing["free_tier_prompt_included"],
+                                    "free_tier_completion_included": billing["free_tier_completion_included"],
+                                    "monthly_prompt_tokens_before_request": billing["monthly_prompt_tokens_before_request"],
+                                    "monthly_completion_tokens_before_request": billing["monthly_completion_tokens_before_request"],
+                                    "monthly_prompt_tokens_after_request": billing["monthly_prompt_tokens_after_request"],
+                                    "monthly_completion_tokens_after_request": billing["monthly_completion_tokens_after_request"],
+                                    "free_prompt_tokens_applied": billing["free_prompt_tokens_applied"],
+                                    "free_completion_tokens_applied": billing["free_completion_tokens_applied"],
+                                    "billable_prompt_tokens": billing["billable_prompt_tokens"],
+                                    "billable_completion_tokens": billing["billable_completion_tokens"],
+                                    "payg_prompt_rate_per_million": billing["payg_prompt_rate_per_million"],
+                                    "payg_completion_rate_per_million": billing["payg_completion_rate_per_million"],
+                                    "estimated_payg_cost_usd": billing["estimated_payg_cost_usd"],
+                                    "request_surcharge_usd": billing["request_surcharge_usd"],
+                                }
+
+                                if cost_known:
+                                    additional_fields["estimated_cost_usd"] = estimated_cost
+
+                                if rate_limit_headers:
+                                    additional_fields["circuit_rate_limits"] = rate_limit_headers
+
+                                splunk_hec.send_usage_event(
+                                    subkey=caller_subkey,
+                                    model=model,
+                                    requests=1,
+                                    prompt_tokens=prompt_tokens,
+                                    completion_tokens=completion_tokens,
+                                    total_tokens=total_tokens,
+                                    additional_fields=additional_fields,
+                                    friendly_name=friendly_name,
+                                    email=email,
+                                )
+                        elif caller_subkey and quota_manager:
+                            logger.warning("[STREAMING] No usage data collected from stream")
+
+                    return StreamingResponse(
+                        stream_with_usage_tracking(),
+                        status_code=r.status_code,
+                        headers={"Content-Type": response_content_type},
+                        media_type=response_content_type,
                     )
-                    estimated_cost = float(billing["estimated_cost_usd"])
-                    cost_known = bool(billing["pricing_known"])
+
+                try:
+                    await r.aread()
+                finally:
+                    await r.aclose()
+                    await upstream_client.aclose()
+            else:
+                async with httpx.AsyncClient(timeout=90) as client:
+                    r = await client.post(target_url, json=req_data, headers=headers)
+                rate_limit_headers = log_circuit_response(r, logger)
+                ct = (r.headers.get("content-type") or "").lower()
+
+            logger.debug("[NON-STREAMING RESPONSE] Processing JSON response")
+            if "application/json" in ct and r.content:
+                logger.debug(f"[NON-STREAMING RESPONSE] Full JSON response: {r.text}")
+
+            if caller_subkey and quota_manager:
+                prompt_tokens = 0
+                completion_tokens = 0
+                total_tokens = 0
+                try:
+                    if "application/json" in ct and r.content:
+                        payload = r.json()
+                        usage = payload.get("usage") if isinstance(payload, dict) else None
+                        if isinstance(usage, dict):
+                            prompt_tokens = int(usage.get("prompt_tokens") or 0)
+                            completion_tokens = int(usage.get("completion_tokens") or 0)
+                            total_tokens = int(usage.get("total_tokens") or (prompt_tokens + completion_tokens))
+                            logger.debug(f"[TOKEN EXTRACTION] Successfully extracted tokens: prompt={prompt_tokens}, completion={completion_tokens}, total={total_tokens}")
+                        else:
+                            logger.debug("[TOKEN EXTRACTION] No usage dict found in response payload")
+                    else:
+                        logger.debug(f"[TOKEN EXTRACTION] Skipped - Content-Type: {ct}, has_content: {bool(r.content)}")
+                except Exception as e:
+                    logger.warning(
+                        f"[TOKEN EXTRACTION] Failed to extract token usage from response: {type(e).__name__}: {e}. "
+                        f"Content-Type: {ct}, Status: {r.status_code}, "
+                        f"Has content: {bool(r.content)}"
+                    )
+                    logger.debug(f"[TOKEN EXTRACTION] Response body that failed to parse: {r.text[:500] if r.text else 'empty'}")
+
+                usage_month, billing = build_billing_context(
+                    quota_manager=quota_manager,
+                    subkey=caller_subkey,
+                    model=model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    request_count=1,
+                )
+                estimated_cost = float(billing["estimated_cost_usd"])
+                cost_known = bool(billing["pricing_known"])
+                if cost_known:
+                    logger.debug(
+                        f"[COST] Estimated cost for non-streaming request: ${estimated_cost:.6f} "
+                        f"(tier={billing['pricing_tier']}, payg=${billing['estimated_payg_cost_usd']:.6f})"
+                    )
+
+                quota_manager.record_usage(
+                    subkey=caller_subkey,
+                    model=model,
+                    request_inc=1,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    usage_month=usage_month,
+                )
+
+                if splunk_hec:
+                    friendly_name, email = quota_manager.get_name_and_email(caller_subkey)
+                    additional_fields = {
+                        "status_code": r.status_code,
+                        "success": r.status_code < 400,
+                        "client_ip": client_ip,
+                        "x_forwarded_for": x_forwarded_for,
+                        "is_streaming": False,
+                        "cost_known": cost_known,
+                        "pricing_model": billing["pricing_model"],
+                        "pricing_tier_mode": billing["pricing_tier_mode"],
+                        "pricing_tier": billing["pricing_tier"],
+                        "free_tier_eligible": billing["free_tier_eligible"],
+                        "billing_period_month": billing["billing_period_month"],
+                        "free_tier_prompt_included": billing["free_tier_prompt_included"],
+                        "free_tier_completion_included": billing["free_tier_completion_included"],
+                        "monthly_prompt_tokens_before_request": billing["monthly_prompt_tokens_before_request"],
+                        "monthly_completion_tokens_before_request": billing["monthly_completion_tokens_before_request"],
+                        "monthly_prompt_tokens_after_request": billing["monthly_prompt_tokens_after_request"],
+                        "monthly_completion_tokens_after_request": billing["monthly_completion_tokens_after_request"],
+                        "free_prompt_tokens_applied": billing["free_prompt_tokens_applied"],
+                        "free_completion_tokens_applied": billing["free_completion_tokens_applied"],
+                        "billable_prompt_tokens": billing["billable_prompt_tokens"],
+                        "billable_completion_tokens": billing["billable_completion_tokens"],
+                        "payg_prompt_rate_per_million": billing["payg_prompt_rate_per_million"],
+                        "payg_completion_rate_per_million": billing["payg_completion_rate_per_million"],
+                        "estimated_payg_cost_usd": billing["estimated_payg_cost_usd"],
+                        "request_surcharge_usd": billing["request_surcharge_usd"],
+                    }
+
                     if cost_known:
-                        logger.debug(
-                            f"[COST] Estimated cost for non-streaming request: ${estimated_cost:.6f} "
-                            f"(tier={billing['pricing_tier']}, payg=${billing['estimated_payg_cost_usd']:.6f})"
-                        )
-                    
-                    quota_manager.record_usage(
+                        additional_fields["estimated_cost_usd"] = estimated_cost
+
+                    if rate_limit_headers:
+                        additional_fields["circuit_rate_limits"] = rate_limit_headers
+
+                    splunk_hec.send_usage_event(
                         subkey=caller_subkey,
                         model=model,
-                        request_inc=1,
+                        requests=1,
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
                         total_tokens=total_tokens,
-                        usage_month=usage_month,
+                        additional_fields=additional_fields,
+                        friendly_name=friendly_name,
+                        email=email,
                     )
-                    
-                    # Send usage event to Splunk HEC
-                    if splunk_hec:
-                        friendly_name, email = quota_manager.get_name_and_email(caller_subkey)
-                        
-                        # Prepare additional fields with cost and rate limits
-                        additional_fields = {
-                            "status_code": r.status_code,
-                            "success": r.status_code < 400,
-                            "client_ip": client_ip,
-                            "x_forwarded_for": x_forwarded_for,
-                            "is_streaming": False,
-                            "cost_known": cost_known,
-                            "pricing_model": billing["pricing_model"],
-                            "pricing_tier_mode": billing["pricing_tier_mode"],
-                            "pricing_tier": billing["pricing_tier"],
-                            "free_tier_eligible": billing["free_tier_eligible"],
-                            "billing_period_month": billing["billing_period_month"],
-                            "free_tier_prompt_included": billing["free_tier_prompt_included"],
-                            "free_tier_completion_included": billing["free_tier_completion_included"],
-                            "monthly_prompt_tokens_before_request": billing["monthly_prompt_tokens_before_request"],
-                            "monthly_completion_tokens_before_request": billing["monthly_completion_tokens_before_request"],
-                            "monthly_prompt_tokens_after_request": billing["monthly_prompt_tokens_after_request"],
-                            "monthly_completion_tokens_after_request": billing["monthly_completion_tokens_after_request"],
-                            "free_prompt_tokens_applied": billing["free_prompt_tokens_applied"],
-                            "free_completion_tokens_applied": billing["free_completion_tokens_applied"],
-                            "billable_prompt_tokens": billing["billable_prompt_tokens"],
-                            "billable_completion_tokens": billing["billable_completion_tokens"],
-                            "payg_prompt_rate_per_million": billing["payg_prompt_rate_per_million"],
-                            "payg_completion_rate_per_million": billing["payg_completion_rate_per_million"],
-                            "estimated_payg_cost_usd": billing["estimated_payg_cost_usd"],
-                            "request_surcharge_usd": billing["request_surcharge_usd"],
-                        }
-                        
-                        if cost_known:
-                            additional_fields["estimated_cost_usd"] = estimated_cost
-                        
-                        # Add rate limit info if available
-                        if rate_limit_headers:
-                            additional_fields["circuit_rate_limits"] = rate_limit_headers
-                        
-                        splunk_hec.send_usage_event(
-                            subkey=caller_subkey,
-                            model=model,
-                            requests=1,
-                            prompt_tokens=prompt_tokens,
-                            completion_tokens=completion_tokens,
-                            total_tokens=total_tokens,
-                            additional_fields=additional_fields,
-                            friendly_name=friendly_name,
-                            email=email,
-                        )
 
-                logger.info(f"Circuit API response: {r.status_code}")
-                if r.status_code >= 400:
-                    logger.error(f"Circuit API error response: {r.text}")
+            logger.info(f"Circuit API response: {r.status_code}")
+            if r.status_code >= 400:
+                logger.error(f"Circuit API error response: {r.text}")
 
-                return Response(
-                    content=r.content,
-                    status_code=r.status_code,
-                    headers={"Content-Type": r.headers.get("content-type", "application/json")},
-                )
+            return Response(
+                content=r.content,
+                status_code=r.status_code,
+                headers={"Content-Type": r.headers.get("content-type", "application/json")},
+            )
         except httpx.TimeoutException:
             logger.error("Circuit API request timed out")
             raise HTTPException(

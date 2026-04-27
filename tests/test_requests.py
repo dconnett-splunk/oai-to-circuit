@@ -12,9 +12,17 @@ from oai_to_circuit.config import BridgeConfig
 class _FakeCircuitAsyncClient:
     """Stand-in for httpx.AsyncClient used *inside* the app to call Circuit."""
 
+    post_call_count = 0
+    send_call_count = 0
+
     def __init__(self, *args, timeout=None, **kwargs) -> None:
         self.timeout = timeout
         self.calls: list[tuple[str, dict, dict]] = []
+
+    @classmethod
+    def reset_counts(cls) -> None:
+        cls.post_call_count = 0
+        cls.send_call_count = 0
 
     async def __aenter__(self):
         return self
@@ -22,7 +30,14 @@ class _FakeCircuitAsyncClient:
     async def __aexit__(self, exc_type, exc, tb):
         return False
 
+    async def aclose(self):
+        return None
+
+    def build_request(self, method: str, url: str, json=None, headers=None):
+        return httpx.Request(method, url, json=json, headers=headers)
+
     async def post(self, url: str, json=None, headers=None):
+        type(self).post_call_count += 1
         self.calls.append((url, json or {}, headers or {}))
         req = httpx.Request("POST", url)
         return httpx.Response(
@@ -35,6 +50,20 @@ class _FakeCircuitAsyncClient:
             },
             headers={"content-type": "application/json"},
             request=req,
+        )
+
+    async def send(self, request: httpx.Request, stream: bool = False):
+        type(self).send_call_count += 1
+        stream_body = (
+            b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
+            b'data: {"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}\n\n'
+            b"data: [DONE]\n\n"
+        )
+        return httpx.Response(
+            200,
+            content=stream_body,
+            headers={"content-type": "text/event-stream; charset=utf-8"},
+            request=request,
         )
 
 
@@ -179,6 +208,39 @@ def test_chat_completion_records_quota_usage_from_circuit_response(
         conn.close()
 
 
+def test_chat_completion_streaming_only_sends_one_upstream_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from oai_to_circuit import app as app_mod
+
+    quota_db = tmp_path / "quota.db"
+
+    async def _tok(**kwargs) -> str:
+        return "token"
+
+    _FakeCircuitAsyncClient.reset_counts()
+    monkeypatch.setattr(app_mod, "get_access_token", _tok)
+    monkeypatch.setattr(app_mod.httpx, "AsyncClient", _FakeCircuitAsyncClient)
+    monkeypatch.setattr(
+        app_mod,
+        "load_quotas_from_env_or_file",
+        lambda: {"sk": {"gpt-5": {"requests": 10, "total_tokens": 999}}},
+    )
+
+    app = create_app(config=_make_test_config(quota_db_path=str(quota_db), require_subkey=False))
+    with TestClient(app) as client:
+        r = client.post(
+            "/v1/chat/completions",
+            headers={"X-Bridge-Subkey": "sk"},
+            json={"model": "gpt-5", "messages": [{"role": "user", "content": "hi"}], "stream": True},
+        )
+        assert r.status_code == 200
+        assert "data:" in r.text
+
+    assert _FakeCircuitAsyncClient.send_call_count == 1
+    assert _FakeCircuitAsyncClient.post_call_count == 0
+
+
 def test_chat_completion_user_field_invalid_json_does_not_crash(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from oai_to_circuit import app as app_mod
 
@@ -271,3 +333,20 @@ def test_chat_completion_emits_free_tier_billing_metadata(tmp_path: Path, monkey
     assert fields["billable_prompt_tokens"] == 0
     assert fields["billable_completion_tokens"] == 0
     assert fields["billing_period_month"]
+
+
+def test_chat_completion_options_preflight_succeeds(tmp_path: Path):
+    app = create_app(config=_make_test_config(quota_db_path=str(tmp_path / "q.db"), require_subkey=False))
+    with TestClient(app) as client:
+        r = client.options(
+            "/v1/chat/completions",
+            headers={
+                "Origin": "https://example.com",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "authorization,x-bridge-subkey,content-type",
+            },
+        )
+
+    assert r.status_code == 200
+    assert r.headers["access-control-allow-origin"] == "*"
+    assert "POST" in r.headers["access-control-allow-methods"]
