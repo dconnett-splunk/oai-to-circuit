@@ -12,6 +12,7 @@
       {% if user.template_name %}
       <span class="pill">Template: {{ user.template_name }}</span>
       {% endif %}
+      <span class="pill">Backend: {{ user.backend_id or default_backend_id }}{% if not user.backend_id %} (default){% endif %}</span>
       {% if user.email %}
       <span class="pill">{{ user.email }}</span>
       {% endif %}
@@ -74,10 +75,22 @@
     <div class="panel__head panel__head--split">
       <div>
         <p class="panel__eyebrow">Policy stack</p>
-        <h2>Template and local overrides</h2>
+        <h2>Backend, template, and local overrides</h2>
       </div>
     </div>
     <form method="post" action="/admin/users/{{ user.subkey | urlencode }}/policy" class="stack-form">
+      <label>
+        <span>Backend</span>
+        <select name="backend_id">
+          <option value="" {% if not user.backend_id %}selected{% endif %}>Default backend ({{ default_backend_id }})</option>
+          {% for backend_id in backend_options %}
+          <option value="{{ backend_id }}" {% if user.backend_id == backend_id %}selected{% endif %}>
+            {{ backend_id }}{% if backend_id == default_backend_id %} (default){% endif %}
+          </option>
+          {% endfor %}
+        </select>
+        <small class="quota-field__hint">This chooses which upstream Circuit credential set this subkey uses. Leave it on the default option to inherit the service-wide default backend.</small>
+      </label>
       <label>
         <span>Template rule set</span>
         <select name="template_name">
@@ -90,7 +103,7 @@
         </select>
         <small class="quota-field__hint">Effective order is: global defaults, then template rules, then the local overrides below.</small>
       </label>
-      <button type="submit" class="button button--secondary">Save template</button>
+      <button type="submit" class="button button--secondary">Save routing</button>
     </form>
 
     <div class="panel__head panel__head--split">

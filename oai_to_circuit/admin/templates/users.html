@@ -42,6 +42,16 @@
         </select>
         <small class="quota-field__hint">Templates are reusable rule sets. Local rules below override the selected template.</small>
       </label>
+      <label>
+        <span>Backend</span>
+        <select name="backend_id">
+          <option value="">Default backend ({{ default_backend_id }})</option>
+          {% for backend_id in backend_options %}
+          <option value="{{ backend_id }}">{{ backend_id }}{% if backend_id == default_backend_id %} (default){% endif %}</option>
+          {% endfor %}
+        </select>
+        <small class="quota-field__hint">Choose which upstream Circuit credential set this user should use. Leave this on the default option unless the subkey needs to be routed elsewhere.</small>
+      </label>
 
       {{ quota_editor(
         "quota",
@@ -94,6 +104,7 @@
               {% if user.template_name %}
               <p>Template: {{ user.template_name }}</p>
               {% endif %}
+              <p>Backend: {{ user.backend_id or default_backend_id }}{% if not user.backend_id %} (default){% endif %}</p>
             </td>
             <td>{{ "{:,}".format(user.requests) }} req / {{ "{:,}".format(user.total_tokens) }} tok</td>
             <td><a href="/admin/users/{{ user.subkey | urlencode }}" class="panel__action">Open</a></td>

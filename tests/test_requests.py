@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from oai_to_circuit.app import create_app
-from oai_to_circuit.config import BridgeConfig
+from oai_to_circuit.config import BackendConfig, BridgeConfig
 
 
 class _FakeCircuitAsyncClient:
@@ -14,6 +14,8 @@ class _FakeCircuitAsyncClient:
 
     post_call_count = 0
     send_call_count = 0
+    recorded_posts: list[tuple[str, dict, dict]] = []
+    recorded_sends: list[httpx.Request] = []
 
     def __init__(self, *args, timeout=None, **kwargs) -> None:
         self.timeout = timeout
@@ -23,6 +25,8 @@ class _FakeCircuitAsyncClient:
     def reset_counts(cls) -> None:
         cls.post_call_count = 0
         cls.send_call_count = 0
+        cls.recorded_posts = []
+        cls.recorded_sends = []
 
     async def __aenter__(self):
         return self
@@ -39,6 +43,7 @@ class _FakeCircuitAsyncClient:
     async def post(self, url: str, json=None, headers=None):
         type(self).post_call_count += 1
         self.calls.append((url, json or {}, headers or {}))
+        type(self).recorded_posts.append((url, json or {}, headers or {}))
         req = httpx.Request("POST", url)
         return httpx.Response(
             200,
@@ -54,6 +59,7 @@ class _FakeCircuitAsyncClient:
 
     async def send(self, request: httpx.Request, stream: bool = False):
         type(self).send_call_count += 1
+        type(self).recorded_sends.append(request)
         stream_body = (
             b'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
             b'data: {"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}\n\n'
@@ -67,7 +73,14 @@ class _FakeCircuitAsyncClient:
         )
 
 
-def _make_test_config(*, quota_db_path: str, require_subkey: bool, circuit_appkey: str = "") -> BridgeConfig:
+def _make_test_config(
+    *,
+    quota_db_path: str,
+    require_subkey: bool,
+    circuit_appkey: str = "",
+    default_backend_id: str = "default",
+    backend_configs: dict[str, BackendConfig] | None = None,
+) -> BridgeConfig:
     # Dummy values only; these are not real credentials.
     return BridgeConfig(
         circuit_client_id="x",
@@ -87,6 +100,8 @@ def _make_test_config(*, quota_db_path: str, require_subkey: bool, circuit_appke
         admin_username="admin",
         admin_password="",
         admin_title="Circuit Bridge Admin",
+        default_backend_id=default_backend_id,
+        backend_configs=backend_configs or {},
     )
 
 def test_health_check_flags(tmp_path: Path):
@@ -97,6 +112,8 @@ def test_health_check_flags(tmp_path: Path):
         payload = r.json()
         assert payload["status"] == "healthy"
         assert payload["credentials_configured"] is True
+        assert payload["backends_configured"] == 1
+        assert payload["default_backend_id"] == "default"
 
 
 def test_chat_completion_missing_model_returns_400(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -153,6 +170,92 @@ def test_chat_completion_injects_appkey_into_user_field(tmp_path: Path, monkeypa
             json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
         )
         assert r.status_code == 200
+
+
+def test_chat_completion_routes_subkey_to_assigned_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from oai_to_circuit import app as app_mod
+
+    quota_db = tmp_path / "quota.db"
+
+    async def _tok(**kwargs) -> str:
+        return f"token-{kwargs['client_id']}"
+
+    _FakeCircuitAsyncClient.reset_counts()
+    monkeypatch.setattr(app_mod, "get_access_token", _tok)
+    monkeypatch.setattr(app_mod.httpx, "AsyncClient", _FakeCircuitAsyncClient)
+    monkeypatch.setattr(
+        app_mod,
+        "load_quotas_from_env_or_file",
+        lambda: {
+            "_users": {
+                "sk": {
+                    "backend_id": "team-b",
+                    "rules": {"gpt-4o-mini": {"requests": 10}},
+                }
+            }
+        },
+    )
+
+    app = create_app(
+        config=_make_test_config(
+            quota_db_path=str(quota_db),
+            require_subkey=False,
+            circuit_appkey="default-ak",
+            default_backend_id="default",
+            backend_configs={
+                "default": BackendConfig(
+                    client_id="client-a",
+                    client_secret="secret-a",
+                    appkey="appkey-a",
+                    token_url="https://example.invalid/token-a",
+                    circuit_base="https://example.invalid/a",
+                    api_version="2025-04-01-preview",
+                ),
+                "team-b": BackendConfig(
+                    client_id="client-b",
+                    client_secret="secret-b",
+                    appkey="appkey-b",
+                    token_url="https://example.invalid/token-b",
+                    circuit_base="https://example.invalid/b",
+                    api_version="2025-05-01-preview",
+                ),
+            },
+        )
+    )
+    with TestClient(app) as client:
+        r = client.post(
+            "/v1/chat/completions",
+            headers={"X-Bridge-Subkey": "sk"},
+            json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
+        )
+        assert r.status_code == 200
+
+    assert len(_FakeCircuitAsyncClient.recorded_posts) == 1
+    url, payload, headers = _FakeCircuitAsyncClient.recorded_posts[0]
+    assert url == "https://example.invalid/b/openai/deployments/gpt-4o-mini/chat/completions?api-version=2025-05-01-preview"
+    assert headers["api-key"] == "token-client-b"
+    assert payload["user"] == '{"appkey": "appkey-b"}'
+
+
+def test_chat_completion_rejects_unknown_assigned_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from oai_to_circuit import app as app_mod
+
+    monkeypatch.setattr(
+        app_mod,
+        "load_quotas_from_env_or_file",
+        lambda: {"_users": {"sk": {"backend_id": "missing", "rules": {"gpt-4o-mini": {"requests": 10}}}}},
+    )
+
+    app = create_app(config=_make_test_config(quota_db_path=str(tmp_path / "q.db"), require_subkey=False))
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            headers={"X-Bridge-Subkey": "sk"},
+            json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
+        )
+
+    assert response.status_code == 503
+    assert "unknown backend" in response.json()["detail"].lower()
 
 
 def test_chat_completion_requires_subkey_when_configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

@@ -58,6 +58,12 @@ Set the following environment variables (see `circuit_api.org`):
 - `CIRCUIT_CLIENT_SECRET`
 - `CIRCUIT_APPKEY`
 
+Optional multi-backend routing:
+- `CIRCUIT_BACKENDS_JSON` – JSON mapping backend IDs to credential sets. Each backend entry supports `client_id`, `client_secret`, `appkey`, and optional `token_url`, `circuit_base`, `api_version`.
+- `CIRCUIT_DEFAULT_BACKEND` – backend ID to use when a subkey has no explicit backend assignment.
+
+If `CIRCUIT_BACKENDS_JSON` is not set, the bridge uses the legacy single-backend env vars above as one implicit default backend.
+
 Optional quotas and subkeys:
 - `REQUIRE_SUBKEY` (default: `true`) – require a caller subkey per request
 - `QUOTA_DB_PATH` (default: `quota.db`) – SQLite file for usage tracking
@@ -143,6 +149,7 @@ Advanced quota files can now use a structured format:
   },
   "_users": {
     "alice_key": {
+      "backend_id": "sales-prod",
       "template": "team-standard",
       "rules": {
         "gpt-4o": { "requests": 5 }
@@ -153,6 +160,7 @@ Advanced quota files can now use a structured format:
 ```
 
 The legacy flat `subkey -> rules` format still works and is treated as user-local rules without templates or global defaults.
+If a user omits `backend_id`, that subkey uses `CIRCUIT_DEFAULT_BACKEND`.
 
 For any non-local deployment, set `ADMIN_PASSWORD` so the admin routes require HTTP Basic auth.
 

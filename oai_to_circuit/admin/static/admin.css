@@ -49,7 +49,7 @@ body::before {
 }
 
 .shell {
-  width: min(1200px, calc(100vw - 32px));
+  width: min(1440px, calc(100vw - 40px));
   margin: 28px auto 52px;
 }
 
@@ -179,7 +179,7 @@ body::before {
 .content-grid {
   display: grid;
   gap: 18px;
-  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-bottom: 18px;
 }
 
@@ -604,7 +604,7 @@ textarea {
 
 @media (max-width: 760px) {
   .shell {
-    width: min(100vw - 20px, 1200px);
+    width: min(100vw - 20px, 1440px);
     margin: 12px auto 32px;
   }
 

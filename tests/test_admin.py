@@ -6,7 +6,7 @@ from urllib.parse import urlencode
 from fastapi.testclient import TestClient
 
 from oai_to_circuit.app import create_app
-from oai_to_circuit.config import BridgeConfig
+from oai_to_circuit.config import BackendConfig, BridgeConfig
 
 
 def _make_test_config(
@@ -14,6 +14,8 @@ def _make_test_config(
     quota_db_path: str,
     admin_password: str = "",
     admin_username: str = "admin",
+    default_backend_id: str = "default",
+    backend_configs: dict[str, BackendConfig] | None = None,
 ) -> BridgeConfig:
     return BridgeConfig(
         circuit_client_id="x",
@@ -33,6 +35,8 @@ def _make_test_config(
         admin_username=admin_username,
         admin_password=admin_password,
         admin_title="Circuit Bridge Admin",
+        default_backend_id=default_backend_id,
+        backend_configs=backend_configs or {},
     )
 
 
@@ -191,7 +195,30 @@ def test_admin_can_manage_global_rules_templates_and_user_template_assignment(tm
     monkeypatch.delenv("QUOTAS_JSON", raising=False)
     monkeypatch.setenv("QUOTAS_JSON_PATH", str(quota_file))
 
-    app = create_app(config=_make_test_config(quota_db_path=str(quota_db)))
+    app = create_app(
+        config=_make_test_config(
+            quota_db_path=str(quota_db),
+            default_backend_id="default",
+            backend_configs={
+                "default": BackendConfig(
+                    client_id="client-a",
+                    client_secret="secret-a",
+                    appkey="appkey-a",
+                    token_url="https://example.invalid/token-a",
+                    circuit_base="https://example.invalid/a",
+                    api_version="2025-04-01-preview",
+                ),
+                "secondary": BackendConfig(
+                    client_id="client-b",
+                    client_secret="secret-b",
+                    appkey="appkey-b",
+                    token_url="https://example.invalid/token-b",
+                    circuit_base="https://example.invalid/b",
+                    api_version="2025-05-01-preview",
+                ),
+            },
+        )
+    )
     with TestClient(app) as client:
         global_response = client.post(
             "/admin/policies/global",
@@ -235,6 +262,7 @@ def test_admin_can_manage_global_rules_templates_and_user_template_assignment(tm
                     ("prefix", "templated"),
                     ("custom_subkey", ""),
                     ("template_name", "team-standard"),
+                    ("backend_id", "secondary"),
                     ("quota_model", "gpt-4o"),
                     ("quota_requests", "5"),
                     ("quota_tokens", ""),
@@ -256,4 +284,5 @@ def test_admin_can_manage_global_rules_templates_and_user_template_assignment(tm
     assert stored_quotas["_templates"]["team-standard"]["rules"]["*"]["total_tokens"] == 5000
     user_key = next(iter(stored_quotas["_users"].keys()))
     assert stored_quotas["_users"][user_key]["template"] == "team-standard"
+    assert stored_quotas["_users"][user_key]["backend_id"] == "secondary"
     assert stored_quotas["_users"][user_key]["rules"]["gpt-4o"]["requests"] == 5
