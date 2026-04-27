@@ -60,7 +60,7 @@ Set the following environment variables (see `circuit_api.org`):
 
 Optional multi-backend routing:
 - `CIRCUIT_BACKENDS_JSON` – JSON mapping backend IDs to credential sets. Each backend entry supports `client_id`, `client_secret`, `appkey`, and optional `token_url`, `circuit_base`, `api_version`.
-- `CIRCUIT_BACKENDS_JSON_PATH` – optional file path for backend configuration managed by the admin UI. When set, the UI persists backend edits here.
+- `CIRCUIT_BACKENDS_JSON_PATH` – optional file path for backend configuration managed by the admin UI. In the packaged systemd deployment, this is set to `/etc/oai-to-circuit/backends.json`.
 - `CIRCUIT_DEFAULT_BACKEND` – backend ID to use when a subkey has no explicit backend assignment.
 
 If neither `CIRCUIT_BACKENDS_JSON` nor `CIRCUIT_BACKENDS_JSON_PATH` is set, the bridge uses the legacy single-backend env vars above as one implicit default backend.
@@ -127,7 +127,12 @@ It includes:
 - Per-user quota editing with template assignment plus local wildcard/per-model overrides
 
 If `QUOTAS_JSON_PATH` is file-backed, quota edits are written back to that file. If `QUOTAS_JSON` is set inline, the UI warns that quota edits are runtime-only and will be lost on restart.
-If `CIRCUIT_BACKENDS_JSON_PATH` is configured, backend edits are written back to that file. If `CIRCUIT_BACKENDS_JSON` is set inline, backend edits are runtime-only and will be lost on restart.
+If `CIRCUIT_BACKENDS_JSON_PATH` is configured, backend edits are written back to that file. The packaged service uses `/etc/oai-to-circuit/backends.json`. If `CIRCUIT_BACKENDS_JSON` is set inline, backend edits are runtime-only and will be lost on restart.
+
+For admin-managed config files under `/etc/oai-to-circuit`, the service account needs write access to the specific files, not just read access. The packaged installer/service now expects:
+- `credentials.env` as `640`
+- `quotas.json` as `660`
+- `backends.json` as `660`
 
 Rule precedence is:
 1. Global defaults
@@ -190,6 +195,8 @@ Backend config files written by the admin UI use a structured format:
   }
 }
 ```
+
+The packaged installer creates `/etc/oai-to-circuit/backends.json` from `backends.json.example`, which starts as `{}` so the bridge can continue using the legacy single-backend env vars until you add or edit backends in the admin UI.
 
 For any non-local deployment, set `ADMIN_PASSWORD` so the admin routes require HTTP Basic auth.
 

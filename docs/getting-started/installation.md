@@ -64,16 +64,21 @@ sudo chmod 640 /etc/oai-to-circuit/credentials.env
 sudo chown root:oai-bridge /etc/oai-to-circuit/credentials.env
 ```
 
-### Step 4: Configure Quotas
+### Step 4: Configure Admin-Managed Files
 
-Copy and edit the quotas file:
+Copy and edit the quotas file, then create the backend routing file used by the admin UI:
 
 ```bash
 sudo cp /opt/oai-to-circuit/quotas.json.example /etc/oai-to-circuit/quotas.json
 sudo vim /etc/oai-to-circuit/quotas.json
-sudo chmod 640 /etc/oai-to-circuit/quotas.json
+sudo cp /opt/oai-to-circuit/backends.json.example /etc/oai-to-circuit/backends.json
+sudo chmod 660 /etc/oai-to-circuit/quotas.json
 sudo chown root:oai-bridge /etc/oai-to-circuit/quotas.json
+sudo chmod 660 /etc/oai-to-circuit/backends.json
+sudo chown root:oai-bridge /etc/oai-to-circuit/backends.json
 ```
+
+`backends.json` can start as `{}`. The bridge will continue using the legacy `CIRCUIT_CLIENT_ID` / `CIRCUIT_CLIENT_SECRET` / `CIRCUIT_APPKEY` values until you add managed backends in `/admin/backends`.
 
 ### Step 5: Install Systemd Unit
 
@@ -330,4 +335,3 @@ sudo cp /var/lib/oai-to-circuit/quota.db /backup/quota.db.$(date +%Y%m%d)
 - [Subkey Management](../operations/subkey-management.md) - Managing API keys
 
 **[← Back to Documentation Home](../README.md)**
-

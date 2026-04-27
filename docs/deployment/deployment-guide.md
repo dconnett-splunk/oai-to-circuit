@@ -51,11 +51,16 @@ sudo chmod 750 /etc/oai-to-circuit
 sudo cp credentials.env.example /etc/oai-to-circuit/credentials.env
 sudo vim /etc/oai-to-circuit/credentials.env  # Edit with your credentials
 sudo chmod 640 /etc/oai-to-circuit/credentials.env
+sudo chown root:oai-bridge /etc/oai-to-circuit/credentials.env
 
-# 5. Configure quotas (optional)
+# 5. Configure admin-managed files
 sudo cp quotas.json.example /etc/oai-to-circuit/quotas.json
 sudo vim /etc/oai-to-circuit/quotas.json  # Edit quota rules
-sudo chmod 640 /etc/oai-to-circuit/quotas.json
+sudo cp backends.json.example /etc/oai-to-circuit/backends.json
+sudo chmod 660 /etc/oai-to-circuit/quotas.json
+sudo chmod 660 /etc/oai-to-circuit/backends.json
+sudo chown root:oai-bridge /etc/oai-to-circuit/quotas.json
+sudo chown root:oai-bridge /etc/oai-to-circuit/backends.json
 
 # 6. Install and start service
 sudo cp oai-to-circuit.service /etc/systemd/system/
@@ -673,4 +678,3 @@ systemctl start oai-to-circuit
 **For initial installation**, see [Installation Guide](../getting-started/installation.md).
 
 **For production setup details**, see [Production Setup Guide](../getting-started/production-setup.md).
-

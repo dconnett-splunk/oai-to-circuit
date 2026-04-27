@@ -56,6 +56,13 @@ if [ ! -f "$CONFIG_DIR/quotas.json" ]; then
     fi
 fi
 
+if [ ! -f "$CONFIG_DIR/backends.json" ]; then
+    if [ -f "backends.json.example" ]; then
+        cp backends.json.example "$CONFIG_DIR/backends.json"
+        echo "   ✓ Created backends.json for admin-managed backend routing"
+    fi
+fi
+
 if [ ! -f "$CONFIG_DIR/credentials.env" ]; then
     if [ -f "credentials.env.example" ]; then
         cp credentials.env.example "$CONFIG_DIR/credentials.env"
@@ -74,7 +81,8 @@ chown -R "$SERVICE_USER":"$SERVICE_USER" "$DATA_DIR"
 chown -R "$SERVICE_USER":"$SERVICE_USER" "$LOG_DIR"
 chown -R root:"$SERVICE_USER" "$CONFIG_DIR"
 chmod 750 "$CONFIG_DIR"
-chmod 640 "$CONFIG_DIR"/* 2>/dev/null || true
+chmod 640 "$CONFIG_DIR/credentials.env" 2>/dev/null || true
+chmod 660 "$CONFIG_DIR/quotas.json" "$CONFIG_DIR/backends.json" 2>/dev/null || true
 
 echo "🚀 Installing systemd service..."
 cp oai-to-circuit.service /etc/systemd/system/
@@ -85,8 +93,8 @@ echo ""
 echo "Next steps:"
 echo "1. Edit credentials: sudo nano $CONFIG_DIR/credentials.env"
 echo "2. Edit quotas (optional): sudo nano $CONFIG_DIR/quotas.json"
-echo "3. Enable service: sudo systemctl enable oai-to-circuit"
-echo "4. Start service: sudo systemctl start oai-to-circuit"
-echo "5. Check status: sudo systemctl status oai-to-circuit"
+echo "3. Backends are admin-managed in $CONFIG_DIR/backends.json"
+echo "4. Enable service: sudo systemctl enable oai-to-circuit"
+echo "5. Start service: sudo systemctl start oai-to-circuit"
+echo "6. Check status: sudo systemctl status oai-to-circuit"
 echo ""
-

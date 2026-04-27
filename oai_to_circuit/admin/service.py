@@ -956,10 +956,13 @@ def persist_quotas(quota_manager: QuotaManager, quotas: Dict[str, Any]) -> None:
         return
 
     path = Path(storage.path)
-    if path.parent and not path.parent.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-    payload = serialize_quota_config(normalized)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    try:
+        if path.parent and not path.parent.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+        payload = serialize_quota_config(normalized)
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"Could not write quota config to {path}: {exc.strerror or exc}") from exc
 
 
 def persist_backends(config: BridgeConfig) -> None:
@@ -968,13 +971,16 @@ def persist_backends(config: BridgeConfig) -> None:
         return
 
     path = Path(storage.path)
-    if path.parent and not path.parent.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-    payload = serialize_backend_configs(
-        default_backend_id=config.default_backend_id,
-        backend_configs=config.configured_backends(),
-    )
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    try:
+        if path.parent and not path.parent.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+        payload = serialize_backend_configs(
+            default_backend_id=config.default_backend_id,
+            backend_configs=config.configured_backends(),
+        )
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"Could not write backend config to {path}: {exc.strerror or exc}") from exc
 
 
 def is_subkey_known(quota_manager: QuotaManager, subkey: str) -> bool:
