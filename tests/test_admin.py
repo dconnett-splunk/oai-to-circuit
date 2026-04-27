@@ -286,3 +286,79 @@ def test_admin_can_manage_global_rules_templates_and_user_template_assignment(tm
     assert stored_quotas["_users"][user_key]["template"] == "team-standard"
     assert stored_quotas["_users"][user_key]["backend_id"] == "secondary"
     assert stored_quotas["_users"][user_key]["rules"]["gpt-4o"]["requests"] == 5
+
+
+def test_admin_can_create_and_update_backends(tmp_path: Path, monkeypatch):
+    quota_db = tmp_path / "quota.db"
+    backend_file = tmp_path / "backends.json"
+    monkeypatch.delenv("CIRCUIT_BACKENDS_JSON", raising=False)
+    monkeypatch.setenv("CIRCUIT_BACKENDS_JSON_PATH", str(backend_file))
+
+    app = create_app(
+        config=_make_test_config(
+            quota_db_path=str(quota_db),
+            default_backend_id="default",
+            backend_configs={
+                "default": BackendConfig(
+                    client_id="client-a",
+                    client_secret="secret-a",
+                    appkey="appkey-a",
+                    token_url="https://example.invalid/token-a",
+                    circuit_base="https://example.invalid/a",
+                    api_version="2025-04-01-preview",
+                ),
+            },
+        )
+    )
+    with TestClient(app) as client:
+        page = client.get("/admin/backends")
+        assert page.status_code == 200
+        assert "Create an upstream credential set" in page.text
+        assert "Current default backend" in page.text
+
+        create_response = client.post(
+            "/admin/backends",
+            content=urlencode(
+                [
+                    ("backend_id", "team-b"),
+                    ("client_id", "client-b"),
+                    ("client_secret", "secret-b"),
+                    ("appkey", "appkey-b"),
+                    ("token_url", "https://example.invalid/token-b"),
+                    ("circuit_base", "https://example.invalid/b"),
+                    ("api_version", "2025-05-01-preview"),
+                    ("make_default", "1"),
+                ]
+            ),
+            headers={"content-type": "application/x-www-form-urlencoded"},
+            follow_redirects=False,
+        )
+        assert create_response.status_code == 303
+
+        update_response = client.post(
+            "/admin/backends/team-b",
+            content=urlencode(
+                [
+                    ("client_id", "client-b2"),
+                    ("client_secret", "secret-b2"),
+                    ("appkey", "appkey-b2"),
+                    ("token_url", "https://example.invalid/token-b2"),
+                    ("circuit_base", "https://example.invalid/b2"),
+                    ("api_version", "2025-06-01-preview"),
+                ]
+            ),
+            headers={"content-type": "application/x-www-form-urlencoded"},
+            follow_redirects=False,
+        )
+        assert update_response.status_code == 303
+
+        users_page = client.get("/admin/users")
+        assert users_page.status_code == 200
+        assert "team-b (default)" in users_page.text
+
+    stored_backends = json.loads(backend_file.read_text(encoding="utf-8"))
+    assert stored_backends["_default_backend"] == "team-b"
+    assert stored_backends["backends"]["team-b"]["client_id"] == "client-b2"
+    assert stored_backends["backends"]["team-b"]["circuit_base"] == "https://example.invalid/b2"
+    assert app.state.config.default_backend_id == "team-b"
+    assert app.state.config.configured_backends()["team-b"].api_version == "2025-06-01-preview"

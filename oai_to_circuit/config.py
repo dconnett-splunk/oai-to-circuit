@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, Mapping
 
 
@@ -107,8 +108,17 @@ def _load_backend_configs(
         default_backend_id = requested_default_backend_id or "default"
         return default_backend_id, {default_backend_id: fallback_backend}
 
+    payload_default_backend_id = ""
+    backend_payload = payload
+    if "backends" in payload or "_default_backend" in payload or "default_backend_id" in payload:
+        payload_default_backend_id = _coerce_backend_value(
+            payload.get("_default_backend") or payload.get("default_backend_id")
+        )
+        nested_backends = payload.get("backends")
+        backend_payload = nested_backends if isinstance(nested_backends, dict) else {}
+
     backends: Dict[str, BackendConfig] = {}
-    for backend_id, raw_entry in payload.items():
+    for backend_id, raw_entry in backend_payload.items():
         if not isinstance(backend_id, str) or not isinstance(raw_entry, dict):
             continue
         normalized_backend_id = backend_id.strip()
@@ -120,12 +130,49 @@ def _load_backend_configs(
         default_backend_id = requested_default_backend_id or "default"
         return default_backend_id, {default_backend_id: fallback_backend}
 
-    default_backend_id = requested_default_backend_id.strip()
+    default_backend_id = requested_default_backend_id.strip() or payload_default_backend_id
     if default_backend_id and default_backend_id in backends:
         return default_backend_id, backends
     if "default" in backends:
         return "default", backends
     return next(iter(backends)), backends
+
+
+def serialize_backend_configs(
+    *,
+    default_backend_id: str,
+    backend_configs: Mapping[str, BackendConfig],
+) -> Dict[str, object]:
+    serialized_backends = {
+        backend_id: {
+            "client_id": backend.client_id,
+            "client_secret": backend.client_secret,
+            "appkey": backend.appkey,
+            "token_url": backend.token_url,
+            "circuit_base": backend.circuit_base,
+            "api_version": backend.api_version,
+        }
+        for backend_id, backend in sorted(backend_configs.items())
+    }
+    return {
+        "_default_backend": default_backend_id.strip() or next(iter(serialized_backends), "default"),
+        "backends": serialized_backends,
+    }
+
+
+def _load_backend_json_from_env_or_file() -> str:
+    inline_backends = os.environ.get("CIRCUIT_BACKENDS_JSON", "").strip()
+    if inline_backends:
+        return inline_backends
+
+    backend_path = os.environ.get("CIRCUIT_BACKENDS_JSON_PATH", "").strip()
+    if not backend_path:
+        return ""
+
+    try:
+        return Path(backend_path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
 
 
 def load_config() -> BridgeConfig:
@@ -145,7 +192,7 @@ def load_config() -> BridgeConfig:
         api_version=api_version,
     )
     default_backend_id, backend_configs = _load_backend_configs(
-        raw_json=os.environ.get("CIRCUIT_BACKENDS_JSON", "").strip(),
+        raw_json=_load_backend_json_from_env_or_file(),
         requested_default_backend_id=os.environ.get("CIRCUIT_DEFAULT_BACKEND", "").strip(),
         fallback_backend=fallback_backend,
     )

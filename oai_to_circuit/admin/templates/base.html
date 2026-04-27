@@ -13,10 +13,11 @@
         <div>
           <p class="eyebrow">OAI to Circuit</p>
           <h1>{{ admin_title }}</h1>
-          <p class="masthead__subtitle">User access, quota policy, and usage visibility from the bridge itself.</p>
+          <p class="masthead__subtitle">User access, backend routing, quota policy, and usage visibility from the bridge itself.</p>
         </div>
         <div class="masthead__meta">
           <span class="pill">{{ quota_storage.label }}</span>
+          <span class="pill">{{ backend_storage.label }}</span>
           {% if admin_auth_enabled %}
           <span class="pill pill--secure">Basic auth enabled</span>
           {% endif %}
@@ -27,11 +28,18 @@
         <a href="/admin" class="tabs__link{% if section == 'overview' %} is-active{% endif %}">Overview</a>
         <a href="/admin/users" class="tabs__link{% if section == 'users' %} is-active{% endif %}">Users</a>
         <a href="/admin/policies" class="tabs__link{% if section == 'policies' %} is-active{% endif %}">Policies</a>
+        <a href="/admin/backends" class="tabs__link{% if section == 'backends' %} is-active{% endif %}">Backends</a>
       </nav>
 
       <section class="banner">
-        <strong>{{ quota_storage.label }}</strong>
-        <span>{{ quota_storage.detail }}</span>
+        <div class="banner__item">
+          <strong>{{ quota_storage.label }}</strong>
+          <span>{{ quota_storage.detail }}</span>
+        </div>
+        <div class="banner__item">
+          <strong>{{ backend_storage.label }}</strong>
+          <span>{{ backend_storage.detail }}</span>
+        </div>
       </section>
 
       {% if notice %}

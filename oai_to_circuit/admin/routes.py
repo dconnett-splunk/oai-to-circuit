@@ -9,16 +9,21 @@ from fastapi.templating import Jinja2Templates
 
 from oai_to_circuit.admin.auth import build_admin_guard
 from oai_to_circuit.admin.service import (
+    build_backends_context,
     build_overview_context,
     build_policies_context,
+    create_backend,
     create_user,
     create_template,
     delete_template,
+    get_backend_storage_status,
     get_quota_storage_status,
     get_user_detail,
     list_users_context,
     parse_quota_rows_from_form,
+    set_default_backend,
     update_global_quotas,
+    update_backend,
     update_user_policy,
     update_user_profile,
     update_user_quotas,
@@ -50,17 +55,19 @@ def _render_context(
 ) -> Dict[str, Any]:
     notice = request.query_params.get("notice", "")
     error = request.query_params.get("error", "")
+    current_config = getattr(request.app.state, "config", config)
     return {
         "request": request,
         "section": section,
-        "admin_title": config.admin_title,
-        "admin_auth_enabled": bool(config.admin_password),
+        "admin_title": current_config.admin_title,
+        "admin_auth_enabled": bool(current_config.admin_password),
         "notice": notice,
         "error": error,
         "quota_storage": get_quota_storage_status(),
+        "backend_storage": get_backend_storage_status(),
         "model_suggestions": supported_model_suggestions(),
-        "backend_options": list(config.configured_backends().keys()),
-        "default_backend_id": config.default_backend_id,
+        "backend_options": list(current_config.configured_backends().keys()),
+        "default_backend_id": current_config.default_backend_id,
         **context,
     }
 
@@ -81,6 +88,10 @@ def _redirect_to(path: str, **params: str) -> RedirectResponse:
     query = urlencode({key: value for key, value in params.items() if value})
     target = path if not query else f"{path}?{query}"
     return RedirectResponse(target, status_code=303)
+
+
+def _current_config(request: Request, fallback: BridgeConfig) -> BridgeConfig:
+    return getattr(request.app.state, "config", fallback)
 
 
 def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
@@ -121,9 +132,21 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
             _render_context(request, config=config, section="policies", **context),
         )
 
+    @router.get("/backends", response_class=HTMLResponse)
+    async def admin_backends(request: Request):
+        quota_manager = _require_quota_manager(request)
+        current_config = _current_config(request, config)
+        context = build_backends_context(current_config, quota_manager)
+        return templates.TemplateResponse(
+            request,
+            "backends.html",
+            _render_context(request, config=current_config, section="backends", **context),
+        )
+
     @router.get("/users/{subkey:path}", response_class=HTMLResponse)
     async def admin_user_detail(request: Request, subkey: str):
         quota_manager = _require_quota_manager(request)
+        current_config = _current_config(request, config)
         detail = get_user_detail(quota_manager, subkey)
         if detail is None:
             raise HTTPException(status_code=404, detail="User not found")
@@ -132,7 +155,7 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
             "user_detail.html",
             _render_context(
                 request,
-                config=config,
+                config=current_config,
                 section="users",
                 user=detail,
                 templates=build_policies_context(quota_manager)["template_options"],
@@ -142,6 +165,7 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
     @router.post("/users")
     async def admin_create_user(request: Request):
         quota_manager = _require_quota_manager(request)
+        current_config = _current_config(request, config)
         values = await _form_values(request)
         try:
             quota_rules = parse_quota_rows_from_form(values)
@@ -154,7 +178,7 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
                 prefix=(values.get("prefix") or [""])[0],
                 template_name=(values.get("template_name") or [""])[0],
                 backend_id=(values.get("backend_id") or [""])[0],
-                available_backend_ids=list(config.configured_backends().keys()),
+                available_backend_ids=list(current_config.configured_backends().keys()),
                 quota_rules=quota_rules,
             )
         except ValueError as exc:
@@ -162,7 +186,7 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
             return templates.TemplateResponse(
                 request,
                 "users.html",
-                _render_context(request, config=config, section="users", error=str(exc), **context),
+                _render_context(request, config=current_config, section="users", error=str(exc), **context),
                 status_code=400,
             )
 
@@ -171,6 +195,7 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
     @router.post("/users/{subkey:path}/policy")
     async def admin_update_policy(request: Request, subkey: str):
         quota_manager = _require_quota_manager(request)
+        current_config = _current_config(request, config)
         values = await _form_values(request)
         try:
             update_user_policy(
@@ -178,7 +203,7 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
                 subkey=subkey,
                 template_name=(values.get("template_name") or [""])[0],
                 backend_id=(values.get("backend_id") or [""])[0],
-                available_backend_ids=list(config.configured_backends().keys()),
+                available_backend_ids=list(current_config.configured_backends().keys()),
             )
         except ValueError as exc:
             return _redirect_to(f"/admin/users/{quote(subkey, safe='')}", error=str(exc))
@@ -255,10 +280,62 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
             return templates.TemplateResponse(
                 request,
                 "policies.html",
-                _render_context(request, config=config, section="policies", error=str(exc), **context),
+                _render_context(request, config=_current_config(request, config), section="policies", error=str(exc), **context),
                 status_code=400,
             )
         return _redirect_to("/admin/policies", notice="Template created")
+
+    @router.post("/backends/default")
+    async def admin_set_default_backend(request: Request):
+        current_config = _current_config(request, config)
+        values = await _form_values(request)
+        try:
+            request.app.state.config = set_default_backend(
+                current_config,
+                backend_id=(values.get("backend_id") or [""])[0],
+            )
+        except ValueError as exc:
+            return _redirect_to("/admin/backends", error=str(exc))
+        return _redirect_to("/admin/backends", notice="Default backend updated")
+
+    @router.post("/backends")
+    async def admin_create_backend(request: Request):
+        current_config = _current_config(request, config)
+        values = await _form_values(request)
+        try:
+            request.app.state.config = create_backend(
+                current_config,
+                backend_id=(values.get("backend_id") or [""])[0],
+                client_id=(values.get("client_id") or [""])[0],
+                client_secret=(values.get("client_secret") or [""])[0],
+                appkey=(values.get("appkey") or [""])[0],
+                token_url=(values.get("token_url") or [""])[0],
+                circuit_base=(values.get("circuit_base") or [""])[0],
+                api_version=(values.get("api_version") or [""])[0],
+                make_default=bool((values.get("make_default") or [""])[0]),
+            )
+        except ValueError as exc:
+            return _redirect_to("/admin/backends", error=str(exc))
+        return _redirect_to("/admin/backends", notice="Backend added")
+
+    @router.post("/backends/{backend_id:path}")
+    async def admin_update_backend(request: Request, backend_id: str):
+        current_config = _current_config(request, config)
+        values = await _form_values(request)
+        try:
+            request.app.state.config = update_backend(
+                current_config,
+                backend_id=backend_id,
+                client_id=(values.get("client_id") or [""])[0],
+                client_secret=(values.get("client_secret") or [""])[0],
+                appkey=(values.get("appkey") or [""])[0],
+                token_url=(values.get("token_url") or [""])[0],
+                circuit_base=(values.get("circuit_base") or [""])[0],
+                api_version=(values.get("api_version") or [""])[0],
+            )
+        except ValueError as exc:
+            return _redirect_to("/admin/backends", error=str(exc))
+        return _redirect_to("/admin/backends", notice="Backend updated")
 
     @router.post("/policies/templates/{template_name:path}")
     async def admin_update_template(request: Request, template_name: str):

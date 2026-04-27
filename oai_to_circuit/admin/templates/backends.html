@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="content-grid">
+  <article class="panel panel--form">
+    <div class="panel__head">
+      <div>
+        <p class="panel__eyebrow">Add backend</p>
+        <h2>Create an upstream credential set</h2>
+        <p class="panel__detail">Add a named Circuit backend, then assign users to it from the Users screen or leave them on the service default.</p>
+      </div>
+    </div>
+    <form method="post" action="/admin/backends" class="stack-form">
+      <label>
+        <span>Backend ID</span>
+        <input type="text" name="backend_id" placeholder="sales-prod" required />
+        <small class="quota-field__hint">Use letters, numbers, hyphens, or underscores. Users will reference this ID when routed to the backend.</small>
+      </label>
+      <div class="form-row">
+        <label>
+          <span>Client ID</span>
+          <input type="text" name="client_id" placeholder="oauth-client-id" required />
+        </label>
+        <label>
+          <span>Client secret</span>
+          <input type="password" name="client_secret" placeholder="oauth-client-secret" required />
+        </label>
+      </div>
+      <label>
+        <span>App key</span>
+        <input type="password" name="appkey" placeholder="circuit-app-key" required />
+      </label>
+      <div class="form-row">
+        <label>
+          <span>Token URL</span>
+          <input type="url" name="token_url" value="{{ backend_defaults.token_url }}" required />
+        </label>
+        <label>
+          <span>Circuit base URL</span>
+          <input type="url" name="circuit_base" value="{{ backend_defaults.circuit_base }}" required />
+        </label>
+      </div>
+      <label>
+        <span>API version</span>
+        <input type="text" name="api_version" value="{{ backend_defaults.api_version }}" required />
+      </label>
+      <label class="inline-toggle">
+        <input type="checkbox" name="make_default" value="1" />
+        <span>Make this the default backend for users without an explicit backend assignment.</span>
+      </label>
+      <button type="submit" class="button">Add backend</button>
+    </form>
+  </article>
+
+  <article class="panel">
+    <div class="panel__head">
+      <div>
+        <p class="panel__eyebrow">Routing</p>
+        <h2>Service default and storage mode</h2>
+      </div>
+    </div>
+    <div class="backend-summary">
+      <div class="backend-summary__card">
+        <strong>Current default backend</strong>
+        <code>{{ default_backend_id }}</code>
+        <p>Users with no local backend assignment route here.</p>
+      </div>
+      <div class="backend-summary__card">
+        <strong>Persistence</strong>
+        <p>{{ backend_storage.detail }}</p>
+      </div>
+      <div class="backend-summary__card">
+        <strong>Operational note</strong>
+        <p>Changing a backend updates future upstream requests immediately. Existing usage data and user quota rules are unaffected.</p>
+      </div>
+    </div>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel__head">
+    <div>
+      <p class="panel__eyebrow">Configured backends</p>
+      <h2>Update credentials and routing targets</h2>
+      <p class="panel__detail">Edit the credential set in place. To rename a backend ID, add a new backend and move users over.</p>
+    </div>
+  </div>
+  {% if backends %}
+  <div class="template-grid">
+    {% for backend in backends %}
+    <article class="panel panel--nested panel--form">
+      <div class="panel__head">
+        <div>
+          <p class="panel__eyebrow">Backend</p>
+          <h3>{{ backend.backend_id }}</h3>
+          <p class="panel__detail">Explicitly assigned users: {{ backend.assigned_users }}</p>
+        </div>
+        <div class="template-meta">
+          {% if backend.is_default %}
+          <span class="pill">Current default</span>
+          {% endif %}
+          <span class="pill">{{ backend.assigned_users }} assigned user(s)</span>
+        </div>
+      </div>
+
+      <form method="post" action="/admin/backends/{{ backend.backend_id | urlencode }}" class="stack-form">
+        <div class="form-row">
+          <label>
+            <span>Client ID</span>
+            <input type="text" name="client_id" value="{{ backend.client_id }}" required />
+          </label>
+          <label>
+            <span>Client secret</span>
+            <input type="password" name="client_secret" value="{{ backend.client_secret }}" required />
+          </label>
+        </div>
+        <label>
+          <span>App key</span>
+          <input type="password" name="appkey" value="{{ backend.appkey }}" required />
+        </label>
+        <div class="form-row">
+          <label>
+            <span>Token URL</span>
+            <input type="url" name="token_url" value="{{ backend.token_url }}" required />
+          </label>
+          <label>
+            <span>Circuit base URL</span>
+            <input type="url" name="circuit_base" value="{{ backend.circuit_base }}" required />
+          </label>
+        </div>
+        <label>
+          <span>API version</span>
+          <input type="text" name="api_version" value="{{ backend.api_version }}" required />
+        </label>
+        <div class="button-row">
+          <button type="submit" class="button">Save backend</button>
+        </div>
+      </form>
+
+      {% if not backend.is_default %}
+      <form method="post" action="/admin/backends/default" class="stack-form backend-default-form">
+        <input type="hidden" name="backend_id" value="{{ backend.backend_id }}" />
+        <button type="submit" class="button button--ghost">Make default backend</button>
+      </form>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty-state">No backends are configured yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

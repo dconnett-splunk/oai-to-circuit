@@ -1,10 +1,11 @@
 import json
 import os
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from oai_to_circuit.config import BackendConfig, BridgeConfig, serialize_backend_configs
 from oai_to_circuit.quota import QuotaManager
 from oai_to_circuit.quota_config import (
     QuotaConfig,
@@ -19,6 +20,7 @@ from oai_to_circuit.subkeys import generate_subkey, is_valid_subkey
 
 
 VALID_TEMPLATE_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+VALID_BACKEND_CHARS = VALID_TEMPLATE_CHARS
 
 
 @dataclass(frozen=True)
@@ -97,6 +99,19 @@ class TemplateSummary:
     applied_users: int
     quota_label: str
     quota_rows: List[QuotaRuleRow]
+
+
+@dataclass(frozen=True)
+class BackendSummary:
+    backend_id: str
+    client_id: str
+    client_secret: str
+    appkey: str
+    token_url: str
+    circuit_base: str
+    api_version: str
+    assigned_users: int
+    is_default: bool
 
 
 @dataclass(frozen=True)
@@ -246,6 +261,36 @@ def get_quota_storage_status() -> StorageStatus:
         path=path,
         writable=True,
         detail=f"Quota edits are persisted to {path}.",
+    )
+
+
+def get_backend_storage_status() -> StorageStatus:
+    inline_config = os.environ.get("CIRCUIT_BACKENDS_JSON", "").strip()
+    if inline_config:
+        return StorageStatus(
+            mode="env",
+            label="Runtime backends",
+            path=None,
+            writable=False,
+            detail="CIRCUIT_BACKENDS_JSON is set. Backend edits update the running process only and will be lost after restart.",
+        )
+
+    path = os.environ.get("CIRCUIT_BACKENDS_JSON_PATH", "").strip()
+    if not path:
+        return StorageStatus(
+            mode="runtime",
+            label="Runtime backends",
+            path=None,
+            writable=False,
+            detail="No CIRCUIT_BACKENDS_JSON_PATH is configured. Backend edits apply immediately but are not persisted across restarts.",
+        )
+
+    return StorageStatus(
+        mode="file",
+        label="File-backed backends",
+        path=path,
+        writable=True,
+        detail=f"Backend edits are persisted to {path}.",
     )
 
 
@@ -414,6 +459,40 @@ def build_policies_context(quota_manager: QuotaManager) -> Dict[str, Any]:
         "global_quota_rows": _quota_rows_from_rules(global_rules),
         "templates": templates,
         "template_options": _template_options(quota_config),
+    }
+
+
+def build_backends_context(config: BridgeConfig, quota_manager: QuotaManager) -> Dict[str, Any]:
+    quota_config = quota_manager.snapshot_quota_config()
+    explicit_assignment_counts: Dict[str, int] = {}
+    for entry in quota_config["users"].values():
+        backend_id = str(entry.get("backend_id") or "").strip()
+        if backend_id:
+            explicit_assignment_counts[backend_id] = explicit_assignment_counts.get(backend_id, 0) + 1
+
+    default_backend = config.default_backend()
+    backends = [
+        BackendSummary(
+            backend_id=backend_id,
+            client_id=backend.client_id,
+            client_secret=backend.client_secret,
+            appkey=backend.appkey,
+            token_url=backend.token_url,
+            circuit_base=backend.circuit_base,
+            api_version=backend.api_version,
+            assigned_users=explicit_assignment_counts.get(backend_id, 0),
+            is_default=backend_id == config.default_backend_id,
+        )
+        for backend_id, backend in sorted(config.configured_backends().items())
+    ]
+    return {
+        "backends": backends,
+        "backend_defaults": {
+            "token_url": default_backend.token_url,
+            "circuit_base": default_backend.circuit_base,
+            "api_version": default_backend.api_version,
+        },
+        "backend_storage": get_backend_storage_status(),
     }
 
 
@@ -595,6 +674,36 @@ def _normalize_backend_id(backend_id: str, available_backend_ids: Sequence[str])
     return selected_backend_id
 
 
+def _valid_backend_id(backend_id: str) -> bool:
+    return bool(backend_id) and all(char in VALID_BACKEND_CHARS for char in backend_id)
+
+
+def _required_backend_field(value: str, *, label: str) -> str:
+    cleaned = value.strip()
+    if not cleaned:
+        raise ValueError(f"{label} is required.")
+    return cleaned
+
+
+def _build_backend_config_from_values(
+    *,
+    client_id: str,
+    client_secret: str,
+    appkey: str,
+    token_url: str,
+    circuit_base: str,
+    api_version: str,
+) -> BackendConfig:
+    return BackendConfig(
+        client_id=_required_backend_field(client_id, label="Client ID"),
+        client_secret=_required_backend_field(client_secret, label="Client secret"),
+        appkey=_required_backend_field(appkey, label="App key"),
+        token_url=_required_backend_field(token_url, label="Token URL"),
+        circuit_base=_required_backend_field(circuit_base, label="Circuit base URL"),
+        api_version=_required_backend_field(api_version, label="API version"),
+    )
+
+
 def create_user(
     quota_manager: QuotaManager,
     *,
@@ -762,6 +871,83 @@ def delete_template(quota_manager: QuotaManager, *, template_name: str) -> None:
     persist_quotas(quota_manager, quota_config)
 
 
+def set_default_backend(config: BridgeConfig, *, backend_id: str) -> BridgeConfig:
+    selected_backend_id = backend_id.strip()
+    available_backends = config.configured_backends()
+    if selected_backend_id not in available_backends:
+        raise ValueError("Selected backend does not exist.")
+
+    updated_config = replace(config, default_backend_id=selected_backend_id, backend_configs=available_backends)
+    persist_backends(updated_config)
+    return updated_config
+
+
+def create_backend(
+    config: BridgeConfig,
+    *,
+    backend_id: str,
+    client_id: str,
+    client_secret: str,
+    appkey: str,
+    token_url: str,
+    circuit_base: str,
+    api_version: str,
+    make_default: bool,
+) -> BridgeConfig:
+    normalized_backend_id = backend_id.strip()
+    if not _valid_backend_id(normalized_backend_id):
+        raise ValueError("Backend ID is required and may only contain letters, numbers, hyphens, and underscores.")
+
+    backend_configs = config.configured_backends()
+    if normalized_backend_id in backend_configs:
+        raise ValueError("A backend with that ID already exists.")
+
+    backend_configs[normalized_backend_id] = _build_backend_config_from_values(
+        client_id=client_id,
+        client_secret=client_secret,
+        appkey=appkey,
+        token_url=token_url,
+        circuit_base=circuit_base,
+        api_version=api_version,
+    )
+    updated_config = replace(
+        config,
+        default_backend_id=normalized_backend_id if make_default else config.default_backend_id,
+        backend_configs=backend_configs,
+    )
+    persist_backends(updated_config)
+    return updated_config
+
+
+def update_backend(
+    config: BridgeConfig,
+    *,
+    backend_id: str,
+    client_id: str,
+    client_secret: str,
+    appkey: str,
+    token_url: str,
+    circuit_base: str,
+    api_version: str,
+) -> BridgeConfig:
+    normalized_backend_id = backend_id.strip()
+    backend_configs = config.configured_backends()
+    if normalized_backend_id not in backend_configs:
+        raise ValueError("Backend does not exist.")
+
+    backend_configs[normalized_backend_id] = _build_backend_config_from_values(
+        client_id=client_id,
+        client_secret=client_secret,
+        appkey=appkey,
+        token_url=token_url,
+        circuit_base=circuit_base,
+        api_version=api_version,
+    )
+    updated_config = replace(config, backend_configs=backend_configs)
+    persist_backends(updated_config)
+    return updated_config
+
+
 def persist_quotas(quota_manager: QuotaManager, quotas: Dict[str, Any]) -> None:
     normalized = normalize_quota_config(quotas)
     storage = get_quota_storage_status()
@@ -773,6 +959,21 @@ def persist_quotas(quota_manager: QuotaManager, quotas: Dict[str, Any]) -> None:
     if path.parent and not path.parent.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
     payload = serialize_quota_config(normalized)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def persist_backends(config: BridgeConfig) -> None:
+    storage = get_backend_storage_status()
+    if storage.mode != "file" or not storage.path:
+        return
+
+    path = Path(storage.path)
+    if path.parent and not path.parent.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+    payload = serialize_backend_configs(
+        default_backend_id=config.default_backend_id,
+        backend_configs=config.configured_backends(),
+    )
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 

@@ -164,9 +164,6 @@ def resolve_backend_for_request(
 
 def create_app(*, config: BridgeConfig) -> FastAPI:
     logger = logging.getLogger("oai_to_circuit")
-    token_caches: Dict[str, TokenCache] = {
-        backend_id: TokenCache() for backend_id in config.configured_backends()
-    }
     quota_manager: Optional[QuotaManager] = None
     splunk_hec: Optional[SplunkHEC] = None
 
@@ -214,6 +211,9 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
 
     app = FastAPI(title="OpenAI to Circuit Bridge", version="1.0.0", lifespan=lifespan)
     app.state.config = config
+    app.state.token_caches = {
+        backend_id: TokenCache() for backend_id in config.configured_backends()
+    }
     app.state.quota_manager = None
     app.state.splunk_hec = None
     app.add_middleware(
@@ -226,13 +226,16 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
 
     @app.get("/health")
     async def health_check():
+        current_config: BridgeConfig = app.state.config
         return {
             "status": "healthy",
             "service": "OpenAI to Circuit Bridge",
-            "credentials_configured": bool(config.default_backend().client_id and config.default_backend().client_secret),
-            "appkey_configured": bool(config.default_backend().appkey),
-            "backends_configured": len(config.configured_backends()),
-            "default_backend_id": config.default_backend_id,
+            "credentials_configured": bool(
+                current_config.default_backend().client_id and current_config.default_backend().client_secret
+            ),
+            "appkey_configured": bool(current_config.default_backend().appkey),
+            "backends_configured": len(current_config.configured_backends()),
+            "default_backend_id": current_config.default_backend_id,
         }
 
     @app.options("/v1/chat/completions")
@@ -241,6 +244,8 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
 
     @app.post("/v1/chat/completions")
     async def chat_completion(request: Request):
+        current_config: BridgeConfig = request.app.state.config
+        token_caches: Dict[str, TokenCache] = request.app.state.token_caches
         # Extract client IP and X-Forwarded-For for proper source tracking
         client_ip = request.client.host if request.client else 'unknown'
         x_forwarded_for = request.headers.get("X-Forwarded-For", "")
@@ -266,7 +271,7 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
         logger.info(f"Processing request for model: {model}")
 
         caller_subkey = extract_subkey(request)
-        if config.require_subkey and not caller_subkey:
+        if current_config.require_subkey and not caller_subkey:
             raise HTTPException(
                 status_code=401,
                 detail="Subkey required. Provide 'Authorization: Bearer <subkey>' or 'X-Bridge-Subkey' header.",
@@ -317,7 +322,7 @@ def create_app(*, config: BridgeConfig) -> FastAPI:
                 raise HTTPException(status_code=429, detail="Quota exceeded for this subkey and model (requests)")
 
         backend_id, backend = resolve_backend_for_request(
-            config=config,
+            config=current_config,
             quota_manager=quota_manager,
             caller_subkey=caller_subkey,
         )

@@ -60,9 +60,10 @@ Set the following environment variables (see `circuit_api.org`):
 
 Optional multi-backend routing:
 - `CIRCUIT_BACKENDS_JSON` – JSON mapping backend IDs to credential sets. Each backend entry supports `client_id`, `client_secret`, `appkey`, and optional `token_url`, `circuit_base`, `api_version`.
+- `CIRCUIT_BACKENDS_JSON_PATH` – optional file path for backend configuration managed by the admin UI. When set, the UI persists backend edits here.
 - `CIRCUIT_DEFAULT_BACKEND` – backend ID to use when a subkey has no explicit backend assignment.
 
-If `CIRCUIT_BACKENDS_JSON` is not set, the bridge uses the legacy single-backend env vars above as one implicit default backend.
+If neither `CIRCUIT_BACKENDS_JSON` nor `CIRCUIT_BACKENDS_JSON_PATH` is set, the bridge uses the legacy single-backend env vars above as one implicit default backend.
 
 Optional quotas and subkeys:
 - `REQUIRE_SUBKEY` (default: `true`) – require a caller subkey per request
@@ -122,9 +123,11 @@ It includes:
 - Overview stats for total requests, tokens, top users, and model mix
 - A user directory with generated subkeys, owner metadata, lifecycle status, and usage
 - A Policies screen for global defaults and reusable template rule sets
+- A Backends screen for managing upstream Circuit credential sets and the service default backend
 - Per-user quota editing with template assignment plus local wildcard/per-model overrides
 
 If `QUOTAS_JSON_PATH` is file-backed, quota edits are written back to that file. If `QUOTAS_JSON` is set inline, the UI warns that quota edits are runtime-only and will be lost on restart.
+If `CIRCUIT_BACKENDS_JSON_PATH` is configured, backend edits are written back to that file. If `CIRCUIT_BACKENDS_JSON` is set inline, backend edits are runtime-only and will be lost on restart.
 
 Rule precedence is:
 1. Global defaults
@@ -161,6 +164,32 @@ Advanced quota files can now use a structured format:
 
 The legacy flat `subkey -> rules` format still works and is treated as user-local rules without templates or global defaults.
 If a user omits `backend_id`, that subkey uses `CIRCUIT_DEFAULT_BACKEND`.
+
+Backend config files written by the admin UI use a structured format:
+
+```json
+{
+  "_default_backend": "sales-prod",
+  "backends": {
+    "default": {
+      "client_id": "client-a",
+      "client_secret": "secret-a",
+      "appkey": "appkey-a",
+      "token_url": "https://id.cisco.com/oauth2/default/v1/token",
+      "circuit_base": "https://chat-ai.cisco.com",
+      "api_version": "2025-04-01-preview"
+    },
+    "sales-prod": {
+      "client_id": "client-b",
+      "client_secret": "secret-b",
+      "appkey": "appkey-b",
+      "token_url": "https://id.cisco.com/oauth2/default/v1/token",
+      "circuit_base": "https://chat-ai.cisco.com",
+      "api_version": "2025-05-01-preview"
+    }
+  }
+}
+```
 
 For any non-local deployment, set `ADMIN_PASSWORD` so the admin routes require HTTP Basic auth.
 

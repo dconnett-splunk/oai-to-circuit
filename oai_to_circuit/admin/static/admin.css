@@ -153,6 +153,12 @@ body::before {
   gap: 10px;
 }
 
+.banner__item {
+  display: grid;
+  gap: 4px;
+  min-width: min(360px, 100%);
+}
+
 .flash--success {
   background: rgba(217, 248, 237, 0.92);
 }
@@ -379,6 +385,17 @@ textarea {
   box-shadow: none;
 }
 
+.inline-toggle {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.inline-toggle input {
+  width: auto;
+  margin-top: 3px;
+}
+
 .quota-editor {
   display: grid;
   gap: 16px;
@@ -483,12 +500,44 @@ textarea {
   gap: 10px;
 }
 
+.backend-summary {
+  display: grid;
+  gap: 14px;
+}
+
+.backend-summary__card {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(25, 48, 72, 0.12);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.backend-summary__card code {
+  width: fit-content;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(15, 139, 141, 0.1);
+  color: var(--accent-strong);
+}
+
+.backend-summary__card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
 .template-grid {
   display: grid;
   gap: 18px;
 }
 
 .template-delete-form {
+  margin-top: 12px;
+}
+
+.backend-default-form {
   margin-top: 12px;
 }
 

@@ -258,6 +258,48 @@ def test_chat_completion_rejects_unknown_assigned_backend(tmp_path: Path, monkey
     assert "unknown backend" in response.json()["detail"].lower()
 
 
+def test_chat_completion_uses_runtime_backend_config_from_app_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from oai_to_circuit import app as app_mod
+
+    async def _tok(**kwargs) -> str:
+        return f"token-{kwargs['client_id']}"
+
+    _FakeCircuitAsyncClient.reset_counts()
+    monkeypatch.setattr(app_mod, "get_access_token", _tok)
+    monkeypatch.setattr(app_mod.httpx, "AsyncClient", _FakeCircuitAsyncClient)
+
+    app = create_app(config=_make_test_config(quota_db_path=str(tmp_path / "q.db"), require_subkey=False))
+    app.state.config = _make_test_config(
+        quota_db_path=str(tmp_path / "q.db"),
+        require_subkey=False,
+        default_backend_id="team-b",
+        backend_configs={
+            "team-b": BackendConfig(
+                client_id="client-b",
+                client_secret="secret-b",
+                appkey="appkey-b",
+                token_url="https://example.invalid/token-b",
+                circuit_base="https://example.invalid/b",
+                api_version="2025-05-01-preview",
+            ),
+        },
+    )
+    app.state.token_caches = {}
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
+        )
+        assert response.status_code == 200
+
+    assert len(_FakeCircuitAsyncClient.recorded_posts) == 1
+    url, payload, headers = _FakeCircuitAsyncClient.recorded_posts[0]
+    assert url == "https://example.invalid/b/openai/deployments/gpt-4o-mini/chat/completions?api-version=2025-05-01-preview"
+    assert headers["api-key"] == "token-client-b"
+    assert payload["user"] == '{"appkey": "appkey-b"}'
+
+
 def test_chat_completion_requires_subkey_when_configured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     from oai_to_circuit import app as app_mod
 

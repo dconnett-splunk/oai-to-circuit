@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 
 from oai_to_circuit.config import load_config
 
@@ -85,3 +85,32 @@ def test_load_config_multiple_backends(monkeypatch):
     assert secondary.appkey == "app-b"
     assert secondary.api_version == "2025-05-01-preview"
 
+
+def test_load_config_reads_backends_from_file(tmp_path: Path, monkeypatch):
+    backend_file = tmp_path / "backends.json"
+    backend_file.write_text(
+        """
+        {
+          "_default_backend": "team-b",
+          "backends": {
+            "default": {"client_id": "id-a", "client_secret": "secret-a", "appkey": "app-a"},
+            "team-b": {
+              "client_id": "id-b",
+              "client_secret": "secret-b",
+              "appkey": "app-b",
+              "circuit_base": "https://example.invalid/team-b"
+            }
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("CIRCUIT_BACKENDS_JSON", raising=False)
+    monkeypatch.delenv("CIRCUIT_DEFAULT_BACKEND", raising=False)
+    monkeypatch.setenv("CIRCUIT_BACKENDS_JSON_PATH", str(backend_file))
+
+    cfg = load_config()
+
+    assert cfg.default_backend_id == "team-b"
+    assert set(cfg.configured_backends().keys()) == {"default", "team-b"}
+    assert cfg.default_backend().circuit_base == "https://example.invalid/team-b"
