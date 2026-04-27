@@ -6,7 +6,19 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from oai_to_circuit.quota import QuotaManager
+from oai_to_circuit.quota_config import (
+    QuotaConfig,
+    merge_rule_sets,
+    normalize_quota_config,
+    normalize_rule_map,
+    resolve_user_rules,
+    serialize_quota_config,
+    template_usage_count,
+)
 from oai_to_circuit.subkeys import generate_subkey, is_valid_subkey
+
+
+VALID_TEMPLATE_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
 
 
 @dataclass(frozen=True)
@@ -53,6 +65,7 @@ class UserSummary:
     total_tokens: int
     model_count: int
     quota_label: str
+    template_name: str
 
 
 @dataclass(frozen=True)
@@ -77,6 +90,15 @@ class QuotaRuleRow:
 
 
 @dataclass(frozen=True)
+class TemplateSummary:
+    name: str
+    description: str
+    applied_users: int
+    quota_label: str
+    quota_rows: List[QuotaRuleRow]
+
+
+@dataclass(frozen=True)
 class UserDetail:
     subkey: str
     friendly_name: str
@@ -92,8 +114,11 @@ class UserDetail:
     usage_rows: List[UsageRow]
     monthly_requests: List[BarPoint]
     monthly_tokens: List[BarPoint]
-    quota_rows: List[QuotaRuleRow]
-    default_quota_label: str
+    effective_quota_rows: List[QuotaRuleRow]
+    local_quota_rows: List[QuotaRuleRow]
+    effective_quota_label: str
+    local_quota_label: str
+    template_name: str
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
@@ -104,10 +129,6 @@ def _connect(db_path: str) -> sqlite3.Connection:
 
 def _format_number(value: int) -> str:
     return f"{int(value):,}"
-
-
-def _limit_to_text(value: Optional[int]) -> str:
-    return "Unlimited" if value is None else _format_number(value)
 
 
 def _ratio(current: int, limit: Optional[int]) -> Optional[float]:
@@ -121,17 +142,15 @@ def _chart_points(rows: Sequence[Tuple[str, int]]) -> List[BarPoint]:
         return []
 
     max_value = max(value for _, value in rows) or 1
-    points: List[BarPoint] = []
-    for label, value in rows:
-        points.append(
-            BarPoint(
-                label=label,
-                value=value,
-                value_label=_format_number(value),
-                height_pct=max(8.0, round((value / max_value) * 100.0, 1)) if value else 0.0,
-            )
+    return [
+        BarPoint(
+            label=label,
+            value=value,
+            value_label=_format_number(value),
+            height_pct=max(8.0, round((value / max_value) * 100.0, 1)) if value else 0.0,
         )
-    return points
+        for label, value in rows
+    ]
 
 
 def _progress_rows(rows: Sequence[Tuple[str, int]], *, detail_label: str) -> List[ProgressRow]:
@@ -172,6 +191,41 @@ def _default_quota_label(quota_rules: Mapping[str, Mapping[str, Any]]) -> str:
     return " / ".join(parts)
 
 
+def _quota_rows_from_rules(quota_rules: Mapping[str, Mapping[str, Any]]) -> List[QuotaRuleRow]:
+    rows = [
+        QuotaRuleRow(
+            model=model,
+            requests="" if limits.get("requests") is None else str(limits.get("requests")),
+            total_tokens="" if limits.get("total_tokens") is None else str(limits.get("total_tokens")),
+            pricing_tier=str(limits.get("pricing_tier") or "auto"),
+        )
+        for model, limits in sorted(quota_rules.items(), key=lambda item: ("0" if item[0] == "*" else "1", item[0]))
+    ]
+    if not rows:
+        rows.append(QuotaRuleRow(model="*", requests="", total_tokens="", pricing_tier="auto"))
+    return rows
+
+
+def _combined_limits(quota_rules: Mapping[str, Mapping[str, Any]], model: str) -> Tuple[Optional[int], Optional[int]]:
+    wildcard = quota_rules.get("*") or {}
+    specific = quota_rules.get(model) or {}
+    merged = dict(wildcard)
+    merged.update(specific)
+    requests_limit = merged.get("requests")
+    tokens_limit = merged.get("total_tokens")
+    return (
+        int(requests_limit) if requests_limit is not None else None,
+        int(tokens_limit) if tokens_limit is not None else None,
+    )
+
+
+def _template_options(config: QuotaConfig) -> List[Tuple[str, str]]:
+    return [
+        (name, str(entry.get("description") or ""))
+        for name, entry in sorted(config["templates"].items())
+    ]
+
+
 def get_quota_storage_status() -> StorageStatus:
     inline_config = os.environ.get("QUOTAS_JSON", "").strip()
     if inline_config:
@@ -194,7 +248,7 @@ def get_quota_storage_status() -> StorageStatus:
 
 
 def build_overview_context(quota_manager: QuotaManager) -> Dict[str, Any]:
-    quotas = quota_manager.snapshot_quotas()
+    quota_config = quota_manager.snapshot_quota_config()
     with _connect(quota_manager.db_path) as conn:
         totals = conn.execute(
             """
@@ -235,21 +289,20 @@ def build_overview_context(quota_manager: QuotaManager) -> Dict[str, Any]:
             LIMIT 6
             """
         ).fetchall()
+        known_rows = conn.execute("SELECT subkey FROM subkey_names UNION SELECT subkey FROM key_lifecycle").fetchall()
 
     monthly_requests = _chart_points([(row["usage_month"], int(row["requests"])) for row in monthly])
     monthly_tokens = _chart_points([(row["usage_month"], int(row["total_tokens"])) for row in monthly])
     top_users = _progress_rows([(row["label"], int(row["total_tokens"])) for row in top_users_rows], detail_label="tokens")
     top_models = _progress_rows([(row["model"], int(row["total_tokens"])) for row in model_rows], detail_label="tokens")
 
-    managed_users = set(quotas.keys())
-    with _connect(quota_manager.db_path) as conn:
-        rows = conn.execute("SELECT subkey FROM subkey_names UNION SELECT subkey FROM key_lifecycle").fetchall()
-    managed_users.update(row["subkey"] for row in rows)
+    managed_users = set(quota_config["users"].keys())
+    managed_users.update(row["subkey"] for row in known_rows)
 
     metrics = [
         MetricCard("Total requests", _format_number(int(totals["requests"])), "All recorded requests"),
         MetricCard("Total tokens", _format_number(int(totals["total_tokens"])), "Prompt + completion across every user"),
-        MetricCard("Tracked users", _format_number(len(managed_users)), "Users known from quotas or the admin database"),
+        MetricCard("Tracked users", _format_number(len(managed_users)), "Users known from policy config or the admin database"),
         MetricCard("Active models", _format_number(int(totals["models"])), "Models with recorded usage"),
     ]
 
@@ -264,7 +317,7 @@ def build_overview_context(quota_manager: QuotaManager) -> Dict[str, Any]:
 
 
 def list_users_context(quota_manager: QuotaManager) -> Dict[str, Any]:
-    quotas = quota_manager.snapshot_quotas()
+    quota_config = quota_manager.snapshot_quota_config()
     summaries: Dict[str, UserSummary] = {}
 
     with _connect(quota_manager.db_path) as conn:
@@ -296,6 +349,8 @@ def list_users_context(quota_manager: QuotaManager) -> Dict[str, Any]:
 
     for row in rows:
         subkey = row["subkey"]
+        user_entry = quota_config["users"].get(subkey) or {"template": "", "rules": {}}
+        effective_rules = resolve_user_rules(quota_config, subkey)
         summaries[subkey] = UserSummary(
             subkey=subkey,
             friendly_name=row["friendly_name"],
@@ -305,10 +360,11 @@ def list_users_context(quota_manager: QuotaManager) -> Dict[str, Any]:
             requests=int(row["requests"]),
             total_tokens=int(row["total_tokens"]),
             model_count=int(row["model_count"]),
-            quota_label=_default_quota_label(quotas.get(subkey) or {}),
+            quota_label=_default_quota_label(effective_rules),
+            template_name=user_entry.get("template") or "",
         )
 
-    for subkey, quota_rules in quotas.items():
+    for subkey, entry in quota_config["users"].items():
         summaries.setdefault(
             subkey,
             UserSummary(
@@ -320,7 +376,8 @@ def list_users_context(quota_manager: QuotaManager) -> Dict[str, Any]:
                 requests=0,
                 total_tokens=0,
                 model_count=0,
-                quota_label=_default_quota_label(quota_rules),
+                quota_label=_default_quota_label(resolve_user_rules(quota_config, subkey)),
+                template_name=entry.get("template") or "",
             ),
         )
 
@@ -328,26 +385,39 @@ def list_users_context(quota_manager: QuotaManager) -> Dict[str, Any]:
         summaries.values(),
         key=lambda user: (-user.total_tokens, -user.requests, user.friendly_name.lower(), user.subkey.lower()),
     )
-    return {"users": users, "storage": get_quota_storage_status()}
+    return {
+        "users": users,
+        "storage": get_quota_storage_status(),
+        "templates": _template_options(quota_config),
+    }
 
 
-def _combined_limits(quota_rules: Mapping[str, Mapping[str, Any]], model: str) -> Tuple[Optional[int], Optional[int]]:
-    wildcard = quota_rules.get("*") or {}
-    specific = quota_rules.get(model) or {}
-    merged = dict(wildcard)
-    merged.update(specific)
+def build_policies_context(quota_manager: QuotaManager) -> Dict[str, Any]:
+    quota_config = quota_manager.snapshot_quota_config()
+    global_rules = quota_config["global_rules"]
+    templates = [
+        TemplateSummary(
+            name=name,
+            description=str(entry.get("description") or ""),
+            applied_users=template_usage_count(quota_config, name),
+            quota_label=_default_quota_label(entry.get("rules") or {}),
+            quota_rows=_quota_rows_from_rules(entry.get("rules") or {}),
+        )
+        for name, entry in sorted(quota_config["templates"].items())
+    ]
 
-    requests_limit = merged.get("requests")
-    tokens_limit = merged.get("total_tokens")
-    return (
-        int(requests_limit) if requests_limit is not None else None,
-        int(tokens_limit) if tokens_limit is not None else None,
-    )
+    return {
+        "global_quota_rows": _quota_rows_from_rules(global_rules),
+        "templates": templates,
+        "template_options": _template_options(quota_config),
+    }
 
 
 def get_user_detail(quota_manager: QuotaManager, subkey: str) -> Optional[UserDetail]:
-    quotas = quota_manager.snapshot_quotas()
-    quota_rules = quotas.get(subkey) or {}
+    quota_config = quota_manager.snapshot_quota_config()
+    user_entry = quota_config["users"].get(subkey) or {"template": "", "rules": {}}
+    local_rules = normalize_rule_map(user_entry.get("rules"))
+    effective_rules = resolve_user_rules(quota_config, subkey)
 
     with _connect(quota_manager.db_path) as conn:
         profile = conn.execute(
@@ -401,12 +471,12 @@ def get_user_detail(quota_manager: QuotaManager, subkey: str) -> Optional[UserDe
             (subkey, subkey, subkey),
         ).fetchone()
 
-    if not known and subkey not in quotas:
+    if not known and subkey not in quota_config["users"]:
         return None
 
     usage_view: List[UsageRow] = []
     for row in usage_rows:
-        requests_limit, total_tokens_limit = _combined_limits(quota_rules, row["model"])
+        requests_limit, total_tokens_limit = _combined_limits(effective_rules, row["model"])
         usage_view.append(
             UsageRow(
                 model=row["model"],
@@ -422,8 +492,8 @@ def get_user_detail(quota_manager: QuotaManager, subkey: str) -> Optional[UserDe
         )
 
     if not usage_view:
-        for model in sorted(model for model in quota_rules if model != "*"):
-            requests_limit, total_tokens_limit = _combined_limits(quota_rules, model)
+        for model in sorted(model for model in effective_rules if model != "*"):
+            requests_limit, total_tokens_limit = _combined_limits(effective_rules, model)
             usage_view.append(
                 UsageRow(
                     model=model,
@@ -437,18 +507,6 @@ def get_user_detail(quota_manager: QuotaManager, subkey: str) -> Optional[UserDe
                     token_progress=_ratio(0, total_tokens_limit),
                 )
             )
-
-    quota_rows = [
-        QuotaRuleRow(
-            model=model,
-            requests="" if limits.get("requests") is None else str(limits.get("requests")),
-            total_tokens="" if limits.get("total_tokens") is None else str(limits.get("total_tokens")),
-            pricing_tier=str(limits.get("pricing_tier") or "auto"),
-        )
-        for model, limits in sorted(quota_rules.items(), key=lambda item: ("0" if item[0] == "*" else "1", item[0]))
-    ]
-    if not quota_rows:
-        quota_rows.append(QuotaRuleRow(model="*", requests="", total_tokens="", pricing_tier="auto"))
 
     return UserDetail(
         subkey=subkey,
@@ -465,8 +523,11 @@ def get_user_detail(quota_manager: QuotaManager, subkey: str) -> Optional[UserDe
         usage_rows=usage_view,
         monthly_requests=_chart_points([(row["usage_month"], int(row["requests"])) for row in monthly_rows]),
         monthly_tokens=_chart_points([(row["usage_month"], int(row["total_tokens"])) for row in monthly_rows]),
-        quota_rows=quota_rows,
-        default_quota_label=_default_quota_label(quota_rules),
+        effective_quota_rows=_quota_rows_from_rules(effective_rules),
+        local_quota_rows=_quota_rows_from_rules(local_rules),
+        effective_quota_label=_default_quota_label(effective_rules),
+        local_quota_label=_default_quota_label(local_rules),
+        template_name=user_entry.get("template") or "",
     )
 
 
@@ -480,11 +541,11 @@ def parse_int_field(value: str) -> Optional[int]:
     return parsed
 
 
-def parse_quota_rows_from_form(values: Mapping[str, List[str]]) -> Dict[str, Dict[str, Any]]:
-    models = values.get("quota_model", [])
-    request_limits = values.get("quota_requests", [])
-    token_limits = values.get("quota_tokens", [])
-    pricing_tiers = values.get("quota_pricing_tier", [])
+def parse_quota_rows_from_form(values: Mapping[str, List[str]], *, field_prefix: str = "quota") -> Dict[str, Dict[str, Any]]:
+    models = values.get(f"{field_prefix}_model", [])
+    request_limits = values.get(f"{field_prefix}_requests", [])
+    token_limits = values.get(f"{field_prefix}_tokens", [])
+    pricing_tiers = values.get(f"{field_prefix}_pricing_tier", [])
 
     rules: Dict[str, Dict[str, Any]] = {}
     total_rows = max(len(models), len(request_limits), len(token_limits), len(pricing_tiers))
@@ -514,6 +575,14 @@ def parse_quota_rows_from_form(values: Mapping[str, List[str]]) -> Dict[str, Dic
     return rules
 
 
+def _valid_template_name(name: str) -> bool:
+    return bool(name) and all(char in VALID_TEMPLATE_CHARS for char in name)
+
+
+def _get_user_entry(config: QuotaConfig, subkey: str) -> Dict[str, Any]:
+    return config["users"].get(subkey) or {"template": "", "rules": {}}
+
+
 def create_user(
     quota_manager: QuotaManager,
     *,
@@ -522,13 +591,18 @@ def create_user(
     description: str,
     custom_subkey: str,
     prefix: str,
+    template_name: str,
     quota_rules: Dict[str, Dict[str, Any]],
 ) -> str:
     name = friendly_name.strip()
     if not name:
         raise ValueError("Friendly name is required.")
 
-    quotas = quota_manager.snapshot_quotas()
+    quota_config = quota_manager.snapshot_quota_config()
+    selected_template = template_name.strip()
+    if selected_template and selected_template not in quota_config["templates"]:
+        raise ValueError("Selected template does not exist.")
+
     subkey = custom_subkey.strip()
     if not subkey:
         subkey = generate_unique_subkey(quota_manager, prefix=prefix)
@@ -541,9 +615,11 @@ def create_user(
     quota_manager.upsert_subkey_profile(subkey, name, email.strip(), description.strip())
     quota_manager.set_subkey_status(subkey, "active")
 
-    if quota_rules:
-        quotas[subkey] = quota_rules
-    persist_quotas(quota_manager, quotas)
+    quota_config["users"][subkey] = {
+        "template": selected_template,
+        "rules": quota_rules,
+    }
+    persist_quotas(quota_manager, quota_config)
     return subkey
 
 
@@ -571,35 +647,118 @@ def update_user_status(
     quota_manager.set_subkey_status(subkey, status, revoke_reason)
 
 
+def update_user_template(
+    quota_manager: QuotaManager,
+    *,
+    subkey: str,
+    template_name: str,
+) -> None:
+    quota_config = quota_manager.snapshot_quota_config()
+    selected_template = template_name.strip()
+    if selected_template and selected_template not in quota_config["templates"]:
+        raise ValueError("Selected template does not exist.")
+
+    entry = dict(_get_user_entry(quota_config, subkey))
+    entry["template"] = selected_template
+    quota_config["users"][subkey] = entry
+    persist_quotas(quota_manager, quota_config)
+
+
 def update_user_quotas(
     quota_manager: QuotaManager,
     *,
     subkey: str,
     quota_rules: Dict[str, Dict[str, Any]],
 ) -> None:
-    quotas = quota_manager.snapshot_quotas()
-    if quota_rules:
-        quotas[subkey] = quota_rules
+    quota_config = quota_manager.snapshot_quota_config()
+    entry = dict(_get_user_entry(quota_config, subkey))
+    entry["rules"] = quota_rules
+
+    if entry.get("template") or quota_rules:
+        quota_config["users"][subkey] = entry
     else:
-        quotas.pop(subkey, None)
-    persist_quotas(quota_manager, quotas)
+        quota_config["users"].pop(subkey, None)
+    persist_quotas(quota_manager, quota_config)
 
 
-def persist_quotas(quota_manager: QuotaManager, quotas: Dict[str, Dict[str, Dict[str, Any]]]) -> None:
+def update_global_quotas(quota_manager: QuotaManager, *, quota_rules: Dict[str, Dict[str, Any]]) -> None:
+    quota_config = quota_manager.snapshot_quota_config()
+    quota_config["global_rules"] = quota_rules
+    persist_quotas(quota_manager, quota_config)
+
+
+def create_template(
+    quota_manager: QuotaManager,
+    *,
+    name: str,
+    description: str,
+    quota_rules: Dict[str, Dict[str, Any]],
+) -> None:
+    template_name = name.strip()
+    if not _valid_template_name(template_name):
+        raise ValueError("Template name is required and may only contain letters, numbers, hyphens, and underscores.")
+
+    quota_config = quota_manager.snapshot_quota_config()
+    if template_name in quota_config["templates"]:
+        raise ValueError("A template with that name already exists.")
+
+    quota_config["templates"][template_name] = {
+        "name": template_name,
+        "description": description.strip(),
+        "rules": quota_rules,
+    }
+    persist_quotas(quota_manager, quota_config)
+
+
+def update_template(
+    quota_manager: QuotaManager,
+    *,
+    template_name: str,
+    description: str,
+    quota_rules: Dict[str, Dict[str, Any]],
+) -> None:
+    quota_config = quota_manager.snapshot_quota_config()
+    if template_name not in quota_config["templates"]:
+        raise ValueError("Template does not exist.")
+
+    quota_config["templates"][template_name] = {
+        "name": template_name,
+        "description": description.strip(),
+        "rules": quota_rules,
+    }
+    persist_quotas(quota_manager, quota_config)
+
+
+def delete_template(quota_manager: QuotaManager, *, template_name: str) -> None:
+    quota_config = quota_manager.snapshot_quota_config()
+    if template_name not in quota_config["templates"]:
+        raise ValueError("Template does not exist.")
+
+    usage_count = template_usage_count(quota_config, template_name)
+    if usage_count:
+        raise ValueError(f"Template '{template_name}' is still assigned to {usage_count} user(s). Reassign them first.")
+
+    quota_config["templates"].pop(template_name, None)
+    persist_quotas(quota_manager, quota_config)
+
+
+def persist_quotas(quota_manager: QuotaManager, quotas: Dict[str, Any]) -> None:
+    normalized = normalize_quota_config(quotas)
     storage = get_quota_storage_status()
-    quota_manager.replace_quotas(quotas)
+    quota_manager.replace_quota_config(normalized)
     if storage.mode != "file" or not storage.path:
         return
 
     path = Path(storage.path)
     if path.parent and not path.parent.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(quotas, indent=2, sort_keys=True), encoding="utf-8")
+    payload = serialize_quota_config(normalized)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def is_subkey_known(quota_manager: QuotaManager, subkey: str) -> bool:
-    quotas = quota_manager.snapshot_quotas()
-    if subkey in quotas:
+    quota_config = quota_manager.snapshot_quota_config()
+    if subkey in quota_config["users"]:
         return True
 
     with _connect(quota_manager.db_path) as conn:

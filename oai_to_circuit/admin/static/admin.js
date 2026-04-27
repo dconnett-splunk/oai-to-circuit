@@ -1,15 +1,13 @@
-const quotaTemplate = () => document.getElementById("quota-row-template");
-
 const bindQuotaEditors = () => {
   document.querySelectorAll("[data-quota-editor]").forEach((editor) => {
     const rows = editor.querySelector("[data-quota-rows]");
     const addButton = editor.querySelector("[data-add-quota-row]");
+    const template = editor.querySelector("[data-quota-row-template]");
     if (!rows || !addButton) {
       return;
     }
 
     addButton.addEventListener("click", () => {
-      const template = quotaTemplate();
       if (!template) {
         return;
       }
@@ -32,10 +30,9 @@ const bindQuotaEditors = () => {
         row.querySelectorAll("input").forEach((input) => {
           input.value = "";
         });
-        const select = row.querySelector("select");
-        if (select) {
+        row.querySelectorAll("select").forEach((select) => {
           select.value = "auto";
-        }
+        });
         return;
       }
 

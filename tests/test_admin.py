@@ -180,3 +180,78 @@ def test_admin_can_remove_user_quota_rules(tmp_path: Path, monkeypatch):
     assert response.status_code == 303
     stored_quotas = json.loads(quota_file.read_text(encoding="utf-8"))
     assert "sk-remove" not in stored_quotas
+
+
+def test_admin_can_manage_global_rules_templates_and_user_template_assignment(tmp_path: Path, monkeypatch):
+    quota_db = tmp_path / "quota.db"
+    quota_file = tmp_path / "quotas.json"
+    quota_file.write_text("{}", encoding="utf-8")
+    monkeypatch.delenv("QUOTAS_JSON", raising=False)
+    monkeypatch.setenv("QUOTAS_JSON_PATH", str(quota_file))
+
+    app = create_app(config=_make_test_config(quota_db_path=str(quota_db)))
+    with TestClient(app) as client:
+        global_response = client.post(
+            "/admin/policies/global",
+            content=urlencode(
+                [
+                    ("global_quota_model", "*"),
+                    ("global_quota_requests", "250"),
+                    ("global_quota_tokens", ""),
+                    ("global_quota_pricing_tier", "auto"),
+                ]
+            ),
+            headers={"content-type": "application/x-www-form-urlencoded"},
+            follow_redirects=False,
+        )
+        assert global_response.status_code == 303
+
+        template_response = client.post(
+            "/admin/policies/templates",
+            content=urlencode(
+                [
+                    ("template_name", "team-standard"),
+                    ("template_description", "Shared team defaults"),
+                    ("template_quota_model", "*"),
+                    ("template_quota_requests", "100"),
+                    ("template_quota_tokens", "5000"),
+                    ("template_quota_pricing_tier", "free"),
+                ]
+            ),
+            headers={"content-type": "application/x-www-form-urlencoded"},
+            follow_redirects=False,
+        )
+        assert template_response.status_code == 303
+
+        create_response = client.post(
+            "/admin/users",
+            content=urlencode(
+                [
+                    ("friendly_name", "Template User"),
+                    ("email", "template@example.com"),
+                    ("description", "Uses template"),
+                    ("prefix", "templated"),
+                    ("custom_subkey", ""),
+                    ("template_name", "team-standard"),
+                    ("quota_model", "gpt-4o"),
+                    ("quota_requests", "5"),
+                    ("quota_tokens", ""),
+                    ("quota_pricing_tier", "payg"),
+                ]
+            ),
+            headers={"content-type": "application/x-www-form-urlencoded"},
+            follow_redirects=False,
+        )
+        assert create_response.status_code == 303
+
+        policies_page = client.get("/admin/policies")
+        assert policies_page.status_code == 200
+        assert "Global defaults for all users" in policies_page.text
+        assert "team-standard" in policies_page.text
+
+    stored_quotas = json.loads(quota_file.read_text(encoding="utf-8"))
+    assert stored_quotas["_global"]["*"]["requests"] == 250
+    assert stored_quotas["_templates"]["team-standard"]["rules"]["*"]["total_tokens"] == 5000
+    user_key = next(iter(stored_quotas["_users"].keys()))
+    assert stored_quotas["_users"][user_key]["template"] == "team-standard"
+    assert stored_quotas["_users"][user_key]["rules"]["gpt-4o"]["requests"] == 5

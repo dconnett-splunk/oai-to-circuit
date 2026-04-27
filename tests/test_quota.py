@@ -113,3 +113,41 @@ def test_pricing_tier_can_be_overridden_from_quota_config():
         assert qm.get_pricing_tier("tester", "gpt-5-nano") == "payg"
         assert qm.get_pricing_tier("tester", "gpt-4o-mini") == "auto"
 
+
+def test_global_rules_templates_and_local_rules_merge_in_order():
+    quotas = {
+        "_global": {
+            "*": {"requests": 100, "pricing_tier": "auto"},
+            "gpt-4o": {"requests": 25},
+        },
+        "_templates": {
+            "starter": {
+                "description": "Shared baseline",
+                "rules": {
+                    "*": {"total_tokens": 500},
+                    "gpt-4o": {"requests": 10, "pricing_tier": "payg"},
+                },
+            }
+        },
+        "_users": {
+            "tester": {
+                "template": "starter",
+                "rules": {
+                    "gpt-4o": {"requests": 5},
+                },
+            }
+        },
+    }
+
+    with tempfile.NamedTemporaryFile() as tf:
+        qm = QuotaManager(db_path=tf.name, quotas=quotas)
+
+        assert qm.is_request_allowed("tester", "gpt-4o") is True
+        for _ in range(5):
+            qm.record_usage("tester", "gpt-4o", request_inc=1, total_tokens=10)
+        assert qm.is_request_allowed("tester", "gpt-4o") is False
+
+        assert qm.is_request_allowed("tester", "gpt-4o-mini") is True
+        assert qm.will_exceed_tokens("tester", "gpt-4o-mini", next_total_tokens=500) is False
+        assert qm.will_exceed_tokens("tester", "gpt-4o-mini", next_total_tokens=501) is True
+        assert qm.get_pricing_tier("tester", "gpt-4o") == "payg"

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_quota_macros.html" import quota_editor %}
 {% block content %}
 <section class="content-grid">
   <article class="panel panel--form">
@@ -31,77 +32,24 @@
           <input type="text" name="custom_subkey" placeholder="Optional exact key" />
         </label>
       </div>
+      <label>
+        <span>Template rule set</span>
+        <select name="template_name">
+          <option value="">No template</option>
+          {% for template_name, template_description in templates %}
+          <option value="{{ template_name }}">{{ template_name }}{% if template_description %} - {{ template_description }}{% endif %}</option>
+          {% endfor %}
+        </select>
+        <small class="quota-field__hint">Templates are reusable rule sets. Local rules below override the selected template.</small>
+      </label>
 
-      <div class="quota-editor" data-quota-editor>
-        <div class="quota-editor__head">
-          <div>
-            <p class="panel__eyebrow">Quota rules</p>
-            <h3>Start with a default rule, then add model-specific overrides</h3>
-          </div>
-          <button type="button" class="button button--ghost" data-add-quota-row>Add rule</button>
-        </div>
-        <div class="quota-editor__intro">
-          <p class="quota-editor__summary">
-            The <code>*</code> rule is the default fallback for every model this user can call. Add a second row with a model
-            name like <code>gpt-4o</code> or <code>gpt-4o-mini</code> only when that model should behave differently.
-          </p>
-          <div class="quota-guide">
-            <div class="quota-guide__item">
-              <strong><code>*</code> means default rule</strong>
-              <span>Applied to every model unless a later row names that model explicitly.</span>
-            </div>
-            <div class="quota-guide__item">
-              <strong><code>0</code> blocks a model</strong>
-              <span>Set request limit to zero if a model should be completely unavailable.</span>
-            </div>
-            <div class="quota-guide__item">
-              <strong>Blank means unlimited</strong>
-              <span>Leave requests or token cap empty when you do not want that specific limit.</span>
-            </div>
-            <div class="quota-guide__item">
-              <strong>Pricing tier is reporting only</strong>
-              <span>It affects cost estimates in dashboards, not request enforcement.</span>
-            </div>
-          </div>
-          <p class="quota-editor__example">
-            Example: use <code>*</code> with <code>100</code> requests for a general limit, then add <code>gpt-4o</code> with
-            <code>10</code> requests if that model should be tighter.
-          </p>
-        </div>
-        <div class="quota-rows" data-quota-rows>
-          <div class="quota-row">
-            <div class="quota-row__grid">
-              <label class="quota-field">
-                <span class="quota-field__label">Model rule</span>
-                <input type="text" name="quota_model" value="*" placeholder="* for default, or gpt-4o-mini" />
-                <small class="quota-field__hint"><code>*</code> applies to every model unless another row overrides it.</small>
-              </label>
-              <label class="quota-field">
-                <span class="quota-field__label">Request cap</span>
-                <input type="number" min="0" name="quota_requests" placeholder="Requests" />
-                <small class="quota-field__hint"><code>0</code> blocks the model. Leave blank for no request limit.</small>
-              </label>
-              <label class="quota-field">
-                <span class="quota-field__label">Token cap</span>
-                <input type="number" min="0" name="quota_tokens" placeholder="Total tokens" />
-                <small class="quota-field__hint">Caps total prompt + completion tokens. Blank means unlimited.</small>
-              </label>
-              <label class="quota-field">
-                <span class="quota-field__label">Pricing tier</span>
-                <select name="quota_pricing_tier">
-                  <option value="auto" selected>auto</option>
-                  <option value="free">free</option>
-                  <option value="payg">payg</option>
-                </select>
-                <small class="quota-field__hint">Used for cost estimation in reporting and charts.</small>
-              </label>
-            </div>
-            <div class="quota-row__actions">
-              <button type="button" class="button button--ghost" data-remove-quota-row>Remove rule</button>
-            </div>
-          </div>
-        </div>
-      </div>
+      {{ quota_editor(
+        "quota",
+        [namespace(model='*', requests='', total_tokens='', pricing_tier='auto')],
+        "Local overrides for this user",
+        "These rows are applied after global defaults and any selected template. Use them only where this specific user needs to differ.",
+        "Example: choose a shared template, then add one local gpt-4o row with 10 requests if this user needs a tighter cap than the rest."
+      ) }}
 
       <button type="submit" class="button">Create user</button>
     </form>
@@ -141,7 +89,12 @@
             <td>
               <span class="status-badge status-badge--{{ user.status }}">{{ user.status }}</span>
             </td>
-            <td>{{ user.quota_label }}</td>
+            <td>
+              <strong>{{ user.quota_label }}</strong>
+              {% if user.template_name %}
+              <p>Template: {{ user.template_name }}</p>
+              {% endif %}
+            </td>
             <td>{{ "{:,}".format(user.requests) }} req / {{ "{:,}".format(user.total_tokens) }} tok</td>
             <td><a href="/admin/users/{{ user.subkey | urlencode }}" class="panel__action">Open</a></td>
           </tr>
@@ -154,38 +107,4 @@
     {% endif %}
   </article>
 </section>
-
-<template id="quota-row-template">
-  <div class="quota-row">
-    <div class="quota-row__grid">
-      <label class="quota-field">
-        <span class="quota-field__label">Model rule</span>
-        <input type="text" name="quota_model" placeholder="* for default, or gpt-4o-mini" />
-        <small class="quota-field__hint"><code>*</code> applies to every model unless another row overrides it.</small>
-      </label>
-      <label class="quota-field">
-        <span class="quota-field__label">Request cap</span>
-        <input type="number" min="0" name="quota_requests" placeholder="Requests" />
-        <small class="quota-field__hint"><code>0</code> blocks the model. Leave blank for no request limit.</small>
-      </label>
-      <label class="quota-field">
-        <span class="quota-field__label">Token cap</span>
-        <input type="number" min="0" name="quota_tokens" placeholder="Total tokens" />
-        <small class="quota-field__hint">Caps total prompt + completion tokens. Blank means unlimited.</small>
-      </label>
-      <label class="quota-field">
-        <span class="quota-field__label">Pricing tier</span>
-        <select name="quota_pricing_tier">
-          <option value="auto" selected>auto</option>
-          <option value="free">free</option>
-          <option value="payg">payg</option>
-        </select>
-        <small class="quota-field__hint">Used for cost estimation in reporting and charts.</small>
-      </label>
-    </div>
-    <div class="quota-row__actions">
-      <button type="button" class="button button--ghost" data-remove-quota-row>Remove rule</button>
-    </div>
-  </div>
-</template>
 {% endblock %}

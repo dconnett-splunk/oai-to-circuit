@@ -10,14 +10,20 @@ from fastapi.templating import Jinja2Templates
 from oai_to_circuit.admin.auth import build_admin_guard
 from oai_to_circuit.admin.service import (
     build_overview_context,
+    build_policies_context,
     create_user,
+    create_template,
+    delete_template,
     get_quota_storage_status,
     get_user_detail,
     list_users_context,
     parse_quota_rows_from_form,
+    update_global_quotas,
     update_user_profile,
     update_user_quotas,
     update_user_status,
+    update_user_template,
+    update_template,
 )
 from oai_to_circuit.config import BridgeConfig
 from oai_to_circuit.quota import QuotaManager
@@ -101,6 +107,16 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
             _render_context(request, config=config, section="users", **context),
         )
 
+    @router.get("/policies", response_class=HTMLResponse)
+    async def admin_policies(request: Request):
+        quota_manager = _require_quota_manager(request)
+        context = build_policies_context(quota_manager)
+        return templates.TemplateResponse(
+            request,
+            "policies.html",
+            _render_context(request, config=config, section="policies", **context),
+        )
+
     @router.get("/users/{subkey:path}", response_class=HTMLResponse)
     async def admin_user_detail(request: Request, subkey: str):
         quota_manager = _require_quota_manager(request)
@@ -110,7 +126,13 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
         return templates.TemplateResponse(
             request,
             "user_detail.html",
-            _render_context(request, config=config, section="users", user=detail),
+            _render_context(
+                request,
+                config=config,
+                section="users",
+                user=detail,
+                templates=build_policies_context(quota_manager)["template_options"],
+            ),
         )
 
     @router.post("/users")
@@ -126,6 +148,7 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
                 description=(values.get("description") or [""])[0],
                 custom_subkey=(values.get("custom_subkey") or [""])[0],
                 prefix=(values.get("prefix") or [""])[0],
+                template_name=(values.get("template_name") or [""])[0],
                 quota_rules=quota_rules,
             )
         except ValueError as exc:
@@ -138,6 +161,20 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
             )
 
         return _redirect_to(f"/admin/users/{quote(subkey, safe='')}", notice="User created")
+
+    @router.post("/users/{subkey:path}/policy")
+    async def admin_update_policy(request: Request, subkey: str):
+        quota_manager = _require_quota_manager(request)
+        values = await _form_values(request)
+        try:
+            update_user_template(
+                quota_manager,
+                subkey=subkey,
+                template_name=(values.get("template_name") or [""])[0],
+            )
+        except ValueError as exc:
+            return _redirect_to(f"/admin/users/{quote(subkey, safe='')}", error=str(exc))
+        return _redirect_to(f"/admin/users/{quote(subkey, safe='')}", notice="Policy template updated")
 
     @router.post("/users/{subkey:path}/profile")
     async def admin_update_profile(request: Request, subkey: str):
@@ -180,5 +217,63 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
         except ValueError as exc:
             return _redirect_to(f"/admin/users/{quote(subkey, safe='')}", error=str(exc))
         return _redirect_to(f"/admin/users/{quote(subkey, safe='')}", notice="Quotas updated")
+
+    @router.post("/policies/global")
+    async def admin_update_global_policies(request: Request):
+        quota_manager = _require_quota_manager(request)
+        values = await _form_values(request)
+        try:
+            update_global_quotas(
+                quota_manager,
+                quota_rules=parse_quota_rows_from_form(values, field_prefix="global_quota"),
+            )
+        except ValueError as exc:
+            return _redirect_to("/admin/policies", error=str(exc))
+        return _redirect_to("/admin/policies", notice="Global rules updated")
+
+    @router.post("/policies/templates")
+    async def admin_create_template(request: Request):
+        quota_manager = _require_quota_manager(request)
+        values = await _form_values(request)
+        try:
+            create_template(
+                quota_manager,
+                name=(values.get("template_name") or [""])[0],
+                description=(values.get("template_description") or [""])[0],
+                quota_rules=parse_quota_rows_from_form(values, field_prefix="template_quota"),
+            )
+        except ValueError as exc:
+            context = build_policies_context(quota_manager)
+            return templates.TemplateResponse(
+                request,
+                "policies.html",
+                _render_context(request, config=config, section="policies", error=str(exc), **context),
+                status_code=400,
+            )
+        return _redirect_to("/admin/policies", notice="Template created")
+
+    @router.post("/policies/templates/{template_name:path}")
+    async def admin_update_template(request: Request, template_name: str):
+        quota_manager = _require_quota_manager(request)
+        values = await _form_values(request)
+        try:
+            update_template(
+                quota_manager,
+                template_name=template_name,
+                description=(values.get("template_description") or [""])[0],
+                quota_rules=parse_quota_rows_from_form(values, field_prefix="template_quota"),
+            )
+        except ValueError as exc:
+            return _redirect_to("/admin/policies", error=str(exc))
+        return _redirect_to("/admin/policies", notice="Template updated")
+
+    @router.post("/policies/templates/{template_name:path}/delete")
+    async def admin_delete_template(request: Request, template_name: str):
+        quota_manager = _require_quota_manager(request)
+        try:
+            delete_template(quota_manager, template_name=template_name)
+        except ValueError as exc:
+            return _redirect_to("/admin/policies", error=str(exc))
+        return _redirect_to("/admin/policies", notice="Template deleted")
 
     app.include_router(router)

@@ -7,6 +7,14 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Optional, Dict, Tuple
 
+from oai_to_circuit.quota_config import (
+    QuotaConfig,
+    build_effective_user_map,
+    empty_quota_config,
+    normalize_quota_config,
+    resolve_user_rules,
+)
+
 
 class QuotaManager:
     """
@@ -17,9 +25,11 @@ class QuotaManager:
 
     def __init__(self, db_path: str, quotas: Dict[str, Dict[str, Dict[str, Any]]]):
         self.db_path = db_path
-        self.quotas = quotas or {}
+        self.quota_config: QuotaConfig = empty_quota_config()
+        self.quotas: Dict[str, Dict[str, Dict[str, Any]]] = {}
         self._init_db()
         self._lock = threading.Lock()
+        self._set_quota_config(quotas or {})
 
     def _init_db(self) -> None:
         with self._connect() as conn:
@@ -109,9 +119,14 @@ class QuotaManager:
         finally:
             conn.close()
 
+    def _set_quota_config(self, quotas: Dict[str, Any]) -> None:
+        self.quota_config = normalize_quota_config(quotas)
+        self.quotas = build_effective_user_map(self.quota_config)
+
     def _get_limits(self, subkey: str, model: str) -> Dict[str, Any]:
-        model_limits = (self.quotas.get(subkey) or {}).get(model) or {}
-        wildcard_limits = (self.quotas.get(subkey) or {}).get("*") or {}
+        effective_rules = resolve_user_rules(self.quota_config, subkey)
+        model_limits = (effective_rules.get(model) or {})
+        wildcard_limits = (effective_rules.get("*") or {})
         combined: Dict[str, Any] = dict(wildcard_limits)
         combined.update(model_limits)
         return combined
@@ -177,7 +192,7 @@ class QuotaManager:
             True if the subkey is authorized AND active, False otherwise
         """
         # Check if subkey is in quotas configuration
-        in_quotas = subkey in self.quotas
+        in_quotas = subkey in self.quota_config["users"]
         
         # Check if subkey exists in the database
         with self._connect() as conn:
@@ -256,7 +271,15 @@ class QuotaManager:
 
     def replace_quotas(self, quotas: Dict[str, Dict[str, Dict[str, Any]]]) -> None:
         with self._lock:
-            self.quotas = deepcopy(quotas or {})
+            self._set_quota_config(quotas or {})
+
+    def snapshot_quota_config(self) -> QuotaConfig:
+        with self._lock:
+            return deepcopy(self.quota_config)
+
+    def replace_quota_config(self, quotas: Dict[str, Any]) -> None:
+        with self._lock:
+            self._set_quota_config(quotas or {})
 
     def upsert_subkey_profile(
         self,

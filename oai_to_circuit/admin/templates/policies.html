@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% from "_quota_macros.html" import quota_editor %}
+{% block content %}
+<section class="panel-grid">
+  <article class="panel panel--form">
+    <div class="panel__head">
+      <div>
+        <p class="panel__eyebrow">Global defaults</p>
+        <h2>Rules inherited by every user</h2>
+      </div>
+    </div>
+    <form method="post" action="/admin/policies/global" class="stack-form">
+      {{ quota_editor(
+        "global_quota",
+        global_quota_rows,
+        "Global defaults for all users",
+        "These rules are the base layer. Every managed user inherits them first, unless a template or local override replaces a specific model setting.",
+        "Example: set * to 100 requests globally, then let templates or local overrides make gpt-4o tighter for selected users."
+      ) }}
+      <button type="submit" class="button">Save global rules</button>
+    </form>
+  </article>
+
+  <article class="panel panel--form">
+    <div class="panel__head">
+      <div>
+        <p class="panel__eyebrow">New template</p>
+        <h2>Create a reusable rule set</h2>
+      </div>
+    </div>
+    <form method="post" action="/admin/policies/templates" class="stack-form">
+      <label>
+        <span>Template name</span>
+        <input type="text" name="template_name" placeholder="team-standard" required />
+        <small class="quota-field__hint">Use letters, numbers, hyphens, or underscores.</small>
+      </label>
+      <label>
+        <span>Description</span>
+        <textarea name="template_description" rows="3" placeholder="Who this template is for"></textarea>
+      </label>
+      {{ quota_editor(
+        "template_quota",
+        [namespace(model='*', requests='', total_tokens='', pricing_tier='auto')],
+        "Template rules",
+        "Templates sit between global defaults and user-local overrides. They are useful when many users should share the same policy.",
+        "Example: create a sales-team template with * = 200 requests, then assign it to each seller and only use local overrides for exceptions."
+      ) }}
+      <button type="submit" class="button">Create template</button>
+    </form>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel__head">
+    <div>
+      <p class="panel__eyebrow">Templates</p>
+      <h2>Reusable policy layers</h2>
+    </div>
+  </div>
+  {% if templates %}
+  <div class="template-grid">
+    {% for template in templates %}
+    <article class="panel panel--nested panel--form">
+      <div class="panel__head">
+        <div>
+          <p class="panel__eyebrow">Template</p>
+          <h3>{{ template.name }}</h3>
+          <p class="panel__detail">{{ template.description or "No description yet." }}</p>
+        </div>
+        <div class="template-meta">
+          <span class="pill">{{ template.quota_label }}</span>
+          <span class="pill">{{ template.applied_users }} user(s)</span>
+        </div>
+      </div>
+      <form method="post" action="/admin/policies/templates/{{ template.name | urlencode }}" class="stack-form">
+        <label>
+          <span>Description</span>
+          <textarea name="template_description" rows="3">{{ template.description }}</textarea>
+        </label>
+        {{ quota_editor(
+          "template_quota",
+          template.quota_rows,
+          "Template rules",
+          "Users assigned to this template inherit these rules after global defaults and before their own local overrides.",
+          "Change the shared template here when many users should move together."
+        ) }}
+        <div class="button-row">
+          <button type="submit" class="button">Save template</button>
+        </div>
+      </form>
+      <form method="post" action="/admin/policies/templates/{{ template.name | urlencode }}/delete" class="stack-form template-delete-form">
+        <button type="submit" class="button button--ghost">Delete template</button>
+      </form>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty-state">No templates yet. Create the first reusable rule set from the form above.</p>
+  {% endif %}
+</section>
+{% endblock %}

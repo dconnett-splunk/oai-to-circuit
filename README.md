@@ -115,9 +115,44 @@ The bridge now includes an embedded admin console at [`/admin`](http://localhost
 It includes:
 - Overview stats for total requests, tokens, top users, and model mix
 - A user directory with generated subkeys, owner metadata, lifecycle status, and usage
-- Per-user quota editing with wildcard and per-model rules
+- A Policies screen for global defaults and reusable template rule sets
+- Per-user quota editing with template assignment plus local wildcard/per-model overrides
 
 If `QUOTAS_JSON_PATH` is file-backed, quota edits are written back to that file. If `QUOTAS_JSON` is set inline, the UI warns that quota edits are runtime-only and will be lost on restart.
+
+Rule precedence is:
+1. Global defaults
+2. Optional template rules
+3. User-local overrides
+
+Advanced quota files can now use a structured format:
+
+```json
+{
+  "_global": {
+    "*": { "requests": 100 }
+  },
+  "_templates": {
+    "team-standard": {
+      "description": "Shared team defaults",
+      "rules": {
+        "*": { "requests": 50, "total_tokens": 100000 },
+        "gpt-4o": { "requests": 10 }
+      }
+    }
+  },
+  "_users": {
+    "alice_key": {
+      "template": "team-standard",
+      "rules": {
+        "gpt-4o": { "requests": 5 }
+      }
+    }
+  }
+}
+```
+
+The legacy flat `subkey -> rules` format still works and is treated as user-local rules without templates or global defaults.
 
 For any non-local deployment, set `ADMIN_PASSWORD` so the admin routes require HTTP Basic auth.
 

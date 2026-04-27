@@ -188,6 +188,11 @@ body::before {
   padding: 22px;
 }
 
+.panel--nested {
+  box-shadow: none;
+  background: rgba(255, 255, 255, 0.62);
+}
+
 .panel__head {
   display: flex;
   justify-content: space-between;
@@ -465,6 +470,22 @@ textarea {
 .quota-row__actions {
   display: flex;
   justify-content: flex-end;
+}
+
+.button-row,
+.template-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.template-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.template-delete-form {
+  margin-top: 12px;
 }
 
 .quota-row input,
