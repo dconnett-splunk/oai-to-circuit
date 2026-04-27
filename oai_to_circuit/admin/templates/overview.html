@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_trend_macros.html" import trend_panel %}
 {% block content %}
 <section class="stats-grid">
   {% for metric in metrics %}
@@ -11,57 +12,8 @@
 </section>
 
 <section class="panel-grid">
-  <article class="panel">
-    <div class="panel__head">
-      <div>
-        <p class="panel__eyebrow">Monthly requests</p>
-        <h2>Usage trend</h2>
-      </div>
-    </div>
-    {% if monthly_requests %}
-    <div class="bar-chart" aria-label="Monthly request totals">
-      {% for point in monthly_requests %}
-      <figure class="bar-chart__item">
-        <div class="bar-chart__track">
-          <div class="bar-chart__bar" style="height: {{ point.height_pct }}%"></div>
-        </div>
-        <figcaption>
-          <strong>{{ point.value_label }}</strong>
-          <span>{{ point.label }}</span>
-        </figcaption>
-      </figure>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p class="empty-state">No monthly request history yet.</p>
-    {% endif %}
-  </article>
-
-  <article class="panel">
-    <div class="panel__head">
-      <div>
-        <p class="panel__eyebrow">Monthly tokens</p>
-        <h2>Token consumption</h2>
-      </div>
-    </div>
-    {% if monthly_tokens %}
-    <div class="bar-chart" aria-label="Monthly token totals">
-      {% for point in monthly_tokens %}
-      <figure class="bar-chart__item">
-        <div class="bar-chart__track">
-          <div class="bar-chart__bar bar-chart__bar--accent" style="height: {{ point.height_pct }}%"></div>
-        </div>
-        <figcaption>
-          <strong>{{ point.value_label }}</strong>
-          <span>{{ point.label }}</span>
-        </figcaption>
-      </figure>
-      {% endfor %}
-    </div>
-    {% else %}
-    <p class="empty-state">No token history yet.</p>
-    {% endif %}
-  </article>
+  {{ trend_panel("Monthly requests", "Usage trend", request_trend, empty_message="No monthly request history yet.") }}
+  {{ trend_panel("Monthly tokens", "Token consumption", token_trend, accent="accent", empty_message="No token history yet.") }}
 </section>
 
 <section class="panel-grid">

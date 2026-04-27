@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import Any, Dict, List
-from urllib.parse import parse_qs, quote, urlencode
+from urllib.parse import parse_qs, quote
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -35,6 +35,10 @@ from oai_to_circuit.pricing import supported_model_suggestions
 from oai_to_circuit.quota import QuotaManager
 
 
+FLASH_NOTICE_COOKIE = "admin_notice"
+FLASH_ERROR_COOKIE = "admin_error"
+
+
 def _templates() -> Jinja2Templates:
     root = Path(__file__).resolve().parent
     templates = Jinja2Templates(directory=str(root / "templates"))
@@ -53,8 +57,8 @@ def _render_context(
     section: str,
     **context: Any,
 ) -> Dict[str, Any]:
-    notice = request.query_params.get("notice", "")
-    error = request.query_params.get("error", "")
+    notice = request.cookies.get(FLASH_NOTICE_COOKIE) or request.query_params.get("notice", "")
+    error = request.cookies.get(FLASH_ERROR_COOKIE) or request.query_params.get("error", "")
     current_config = getattr(request.app.state, "config", config)
     return {
         "request": request,
@@ -86,13 +90,38 @@ def _require_quota_manager(request: Request) -> QuotaManager:
 
 
 def _redirect_to(path: str, **params: str) -> RedirectResponse:
-    query = urlencode({key: value for key, value in params.items() if value})
-    target = path if not query else f"{path}?{query}"
-    return RedirectResponse(target, status_code=303)
+    response = RedirectResponse(path, status_code=303)
+    notice = params.get("notice", "")
+    error = params.get("error", "")
+    if notice:
+        response.set_cookie(FLASH_NOTICE_COOKIE, notice, max_age=60, httponly=True, samesite="lax", path="/admin")
+    else:
+        response.delete_cookie(FLASH_NOTICE_COOKIE, path="/admin")
+    if error:
+        response.set_cookie(FLASH_ERROR_COOKIE, error, max_age=60, httponly=True, samesite="lax", path="/admin")
+    else:
+        response.delete_cookie(FLASH_ERROR_COOKIE, path="/admin")
+    return response
 
 
 def _current_config(request: Request, fallback: BridgeConfig) -> BridgeConfig:
     return getattr(request.app.state, "config", fallback)
+
+
+def _template_response(
+    templates: Jinja2Templates,
+    request: Request,
+    template_name: str,
+    context: Dict[str, Any],
+    *,
+    status_code: int = 200,
+) -> HTMLResponse:
+    response = templates.TemplateResponse(request, template_name, context, status_code=status_code)
+    if request.cookies.get(FLASH_NOTICE_COOKIE):
+        response.delete_cookie(FLASH_NOTICE_COOKIE, path="/admin")
+    if request.cookies.get(FLASH_ERROR_COOKIE):
+        response.delete_cookie(FLASH_ERROR_COOKIE, path="/admin")
+    return response
 
 
 def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
@@ -107,7 +136,8 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
     async def admin_overview(request: Request):
         quota_manager = _require_quota_manager(request)
         context = build_overview_context(quota_manager)
-        return templates.TemplateResponse(
+        return _template_response(
+            templates,
             request,
             "overview.html",
             _render_context(request, config=config, section="overview", **context),
@@ -117,7 +147,8 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
     async def admin_users(request: Request):
         quota_manager = _require_quota_manager(request)
         context = list_users_context(quota_manager)
-        return templates.TemplateResponse(
+        return _template_response(
+            templates,
             request,
             "users.html",
             _render_context(request, config=config, section="users", **context),
@@ -127,7 +158,8 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
     async def admin_policies(request: Request):
         quota_manager = _require_quota_manager(request)
         context = build_policies_context(quota_manager)
-        return templates.TemplateResponse(
+        return _template_response(
+            templates,
             request,
             "policies.html",
             _render_context(request, config=config, section="policies", **context),
@@ -138,7 +170,8 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
         quota_manager = _require_quota_manager(request)
         current_config = _current_config(request, config)
         context = build_backends_context(current_config, quota_manager)
-        return templates.TemplateResponse(
+        return _template_response(
+            templates,
             request,
             "backends.html",
             _render_context(request, config=current_config, section="backends", **context),
@@ -151,7 +184,8 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
         detail = get_user_detail(quota_manager, subkey)
         if detail is None:
             raise HTTPException(status_code=404, detail="User not found")
-        return templates.TemplateResponse(
+        return _template_response(
+            templates,
             request,
             "user_detail.html",
             _render_context(
@@ -184,7 +218,8 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
             )
         except ValueError as exc:
             context = list_users_context(quota_manager)
-            return templates.TemplateResponse(
+            return _template_response(
+                templates,
                 request,
                 "users.html",
                 _render_context(request, config=current_config, section="users", error=str(exc), **context),
@@ -278,7 +313,8 @@ def register_admin_routes(app: FastAPI, *, config: BridgeConfig) -> None:
             )
         except ValueError as exc:
             context = build_policies_context(quota_manager)
-            return templates.TemplateResponse(
+            return _template_response(
+                templates,
                 request,
                 "policies.html",
                 _render_context(request, config=_current_config(request, config), section="policies", error=str(exc), **context),

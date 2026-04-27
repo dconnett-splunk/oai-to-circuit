@@ -1,3 +1,4 @@
+import errno
 import json
 import sqlite3
 from dataclasses import replace
@@ -62,6 +63,15 @@ def test_admin_pages_render_usage_views(tmp_path: Path, monkeypatch):
         quota_manager.record_usage(
             "sk-alpha",
             "gpt-4o-mini",
+            request_inc=2,
+            prompt_tokens=15,
+            completion_tokens=25,
+            total_tokens=40,
+            usage_month="2026-03",
+        )
+        quota_manager.record_usage(
+            "sk-alpha",
+            "gpt-4o-mini",
             request_inc=3,
             prompt_tokens=40,
             completion_tokens=80,
@@ -82,6 +92,10 @@ def test_admin_pages_render_usage_views(tmp_path: Path, monkeypatch):
         assert overview.status_code == 200
         assert "Total requests" in overview.text
         assert "Alpha Team" in overview.text
+        assert "Current month" in overview.text
+        assert "Peak month" in overview.text
+        assert "Apr 2026" in overview.text
+        assert "Mar &#39;26" in overview.text or "Mar '26" in overview.text
 
         users = client.get("/admin/users")
         assert users.status_code == 200
@@ -239,6 +253,46 @@ def test_admin_can_remove_user_quota_rules(tmp_path: Path, monkeypatch):
     assert response.status_code == 303
     stored_quotas = json.loads(quota_file.read_text(encoding="utf-8"))
     assert "sk-remove" not in stored_quotas
+
+
+def test_admin_storage_errors_use_flash_cookie_not_query_string(tmp_path: Path, monkeypatch):
+    from oai_to_circuit.admin import service as admin_service_mod
+
+    quota_db = tmp_path / "quota.db"
+    quota_file = tmp_path / "quotas.json"
+    quota_file.write_text("{}", encoding="utf-8")
+    monkeypatch.delenv("QUOTAS_JSON", raising=False)
+    monkeypatch.setenv("QUOTAS_JSON_PATH", str(quota_file))
+
+    def _raise_read_only(self, *args, **kwargs):
+        raise OSError(errno.EROFS, "Read-only file system")
+
+    monkeypatch.setattr(admin_service_mod.Path, "write_text", _raise_read_only)
+
+    app = create_app(config=_make_test_config(quota_db_path=str(quota_db)))
+    with TestClient(app) as client:
+        response = client.post(
+            "/admin/policies/global",
+            content=urlencode(
+                [
+                    ("global_quota_model", "*"),
+                    ("global_quota_requests", "250"),
+                    ("global_quota_tokens", ""),
+                    ("global_quota_pricing_tier", "auto"),
+                ]
+            ),
+            headers={"content-type": "application/x-www-form-urlencoded"},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/admin/policies"
+        assert "admin_error=" in response.headers.get("set-cookie", "")
+
+        policies_page = client.get("/admin/policies")
+        assert policies_page.status_code == 200
+        assert "Could not save quotas." in policies_page.text
+        assert "systemd sandboxing" in policies_page.text
 
 
 def test_admin_can_manage_global_rules_templates_and_user_template_assignment(tmp_path: Path, monkeypatch):

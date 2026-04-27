@@ -1,7 +1,9 @@
+import errno
 import json
 import os
 import sqlite3
 from dataclasses import dataclass, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -37,6 +39,41 @@ class BarPoint:
     value: int
     value_label: str
     height_pct: float
+
+
+@dataclass(frozen=True)
+class TrendPoint:
+    label: str
+    short_label: str
+    value: int
+    value_label: str
+    x_pct: float
+    y_pct: float
+    is_current: bool
+
+
+@dataclass(frozen=True)
+class TrendAxisLabel:
+    label: str
+    x_pct: float
+
+
+@dataclass(frozen=True)
+class TrendChart:
+    current_value: str
+    current_period: str
+    change_label: str
+    change_detail: str
+    change_tone: str
+    peak_value: str
+    peak_period: str
+    span_label: str
+    line_path: str
+    area_path: str
+    points: List[TrendPoint]
+    x_labels: List[TrendAxisLabel]
+    y_labels: List[str]
+    aria_label: str
 
 
 @dataclass(frozen=True)
@@ -151,6 +188,21 @@ def _format_number(value: int) -> str:
     return f"{int(value):,}"
 
 
+def _format_compact_number(value: int) -> str:
+    absolute = abs(int(value))
+    sign = "-" if value < 0 else ""
+    if absolute >= 1_000_000_000:
+        formatted = f"{absolute / 1_000_000_000:.1f}".rstrip("0").rstrip(".")
+        return f"{sign}{formatted}B"
+    if absolute >= 1_000_000:
+        formatted = f"{absolute / 1_000_000:.1f}".rstrip("0").rstrip(".")
+        return f"{sign}{formatted}M"
+    if absolute >= 1_000:
+        formatted = f"{absolute / 1_000:.1f}".rstrip("0").rstrip(".")
+        return f"{sign}{formatted}k"
+    return _format_number(value)
+
+
 def _ratio(current: int, limit: Optional[int]) -> Optional[float]:
     if limit is None or limit <= 0:
         return None
@@ -188,6 +240,172 @@ def _progress_rows(rows: Sequence[Tuple[str, int]], *, detail_label: str) -> Lis
         )
         for label, value in rows
     ]
+
+
+def _parse_usage_month(value: str) -> Optional[datetime]:
+    try:
+        return datetime.strptime(value, "%Y-%m")
+    except ValueError:
+        return None
+
+
+def _month_index(value: datetime) -> int:
+    return (value.year * 12) + value.month - 1
+
+
+def _month_from_index(index: int) -> datetime:
+    year, month_index = divmod(index, 12)
+    return datetime(year, month_index + 1, 1)
+
+
+def _format_usage_month_full(value: Optional[datetime], fallback: str) -> str:
+    return value.strftime("%b %Y") if value else fallback
+
+
+def _format_usage_month_short(value: Optional[datetime], fallback: str) -> str:
+    return value.strftime("%b '%y") if value else fallback
+
+
+def _expand_month_rows(rows: Sequence[Tuple[str, int]], *, limit: int = 12) -> List[Tuple[str, int]]:
+    if not rows:
+        return []
+
+    parsed_rows: List[Tuple[datetime, int]] = []
+    for label, value in rows:
+        month = _parse_usage_month(label)
+        if month is None:
+            return list(rows)[-limit:]
+        parsed_rows.append((month, value))
+
+    values_by_month = {month.strftime("%Y-%m"): value for month, value in parsed_rows}
+    start_index = _month_index(parsed_rows[0][0])
+    end_index = _month_index(parsed_rows[-1][0])
+
+    expanded = [
+        (month.strftime("%Y-%m"), int(values_by_month.get(month.strftime("%Y-%m"), 0)))
+        for index in range(start_index, end_index + 1)
+        for month in [_month_from_index(index)]
+    ]
+    return expanded[-limit:]
+
+
+def _trend_change(current_value: int, previous_period: str, previous_value: int) -> Tuple[str, str, str]:
+    delta = current_value - previous_value
+    if delta > 0:
+        return f"+{_format_number(delta)}", f"vs {previous_period}", "up"
+    if delta < 0:
+        return f"-{_format_number(abs(delta))}", f"vs {previous_period}", "down"
+    return "No change", f"vs {previous_period}", "flat"
+
+
+def _trend_label_indices(point_count: int) -> List[int]:
+    if point_count <= 4:
+        return list(range(point_count))
+
+    candidate_indices = {0, point_count // 3, (point_count * 2) // 3, point_count - 1}
+    return sorted(candidate_indices)
+
+
+def _trend_chart(rows: Sequence[Tuple[str, int]], *, series_label: str) -> Optional[TrendChart]:
+    expanded_rows = _expand_month_rows(rows)
+    if not expanded_rows:
+        return None
+
+    max_value = max(value for _, value in expanded_rows)
+    plot_top = 12.0
+    plot_bottom = 90.0
+    if len(expanded_rows) == 1:
+        x_positions = [50.0]
+    else:
+        x_positions = [
+            round(6.0 + ((88.0 * index) / (len(expanded_rows) - 1)), 2)
+            for index in range(len(expanded_rows))
+        ]
+
+    def _y_position(value: int) -> float:
+        if max_value <= 0:
+            return plot_bottom
+        return round(plot_bottom - ((value / max_value) * (plot_bottom - plot_top)), 2)
+
+    points: List[TrendPoint] = []
+    for index, ((raw_label, value), x_pct) in enumerate(zip(expanded_rows, x_positions)):
+        month = _parse_usage_month(raw_label)
+        full_label = _format_usage_month_full(month, raw_label)
+        short_label = _format_usage_month_short(month, raw_label)
+        points.append(
+            TrendPoint(
+                label=full_label,
+                short_label=short_label,
+                value=value,
+                value_label=_format_number(value),
+                x_pct=x_pct,
+                y_pct=_y_position(value),
+                is_current=index == len(expanded_rows) - 1,
+            )
+        )
+
+    if len(points) == 1:
+        line_path = f"M 42 {points[0].y_pct} L 58 {points[0].y_pct}"
+        area_path = f"M 42 {plot_bottom} L 42 {points[0].y_pct} L 58 {points[0].y_pct} L 58 {plot_bottom} Z"
+    else:
+        line_segments = " L ".join(f"{point.x_pct} {point.y_pct}" for point in points)
+        line_path = f"M {line_segments}"
+        area_path = (
+            f"M {points[0].x_pct} {plot_bottom} L "
+            + " L ".join(f"{point.x_pct} {point.y_pct}" for point in points)
+            + f" L {points[-1].x_pct} {plot_bottom} Z"
+        )
+
+    current_point = points[-1]
+    if len(points) > 1:
+        change_label, change_detail, change_tone = _trend_change(
+            current_point.value,
+            points[-2].label,
+            points[-2].value,
+        )
+    else:
+        change_label, change_detail, change_tone = (
+            "First month recorded",
+            "No earlier month to compare.",
+            "flat",
+        )
+
+    peak_point = max(points, key=lambda point: (point.value, point.label))
+    if len(points) == 1:
+        span_label = f"Showing {points[0].label} only"
+    else:
+        span_label = f"Span: {points[0].label} to {points[-1].label}"
+
+    x_labels = [
+        TrendAxisLabel(label=points[index].short_label, x_pct=points[index].x_pct)
+        for index in _trend_label_indices(len(points))
+    ]
+    midpoint_value = int(round(max_value / 2.0))
+
+    return TrendChart(
+        current_value=current_point.value_label,
+        current_period=current_point.label,
+        change_label=change_label,
+        change_detail=change_detail,
+        change_tone=change_tone,
+        peak_value=peak_point.value_label,
+        peak_period=peak_point.label,
+        span_label=span_label,
+        line_path=line_path,
+        area_path=area_path,
+        points=points,
+        x_labels=x_labels,
+        y_labels=[
+            _format_compact_number(max_value),
+            _format_compact_number(midpoint_value),
+            "0",
+        ],
+        aria_label=(
+            f"{series_label} from {points[0].label} to {points[-1].label}. "
+            f"Current month {current_point.value_label} in {current_point.label}. "
+            f"Peak {peak_point.value_label} in {peak_point.label}."
+        ),
+    )
 
 
 def _default_quota_label(quota_rules: Mapping[str, Mapping[str, Any]]) -> str:
@@ -338,8 +556,10 @@ def build_overview_context(quota_manager: QuotaManager) -> Dict[str, Any]:
         ).fetchall()
         known_rows = conn.execute("SELECT subkey FROM subkey_names UNION SELECT subkey FROM key_lifecycle").fetchall()
 
-    monthly_requests = _chart_points([(row["usage_month"], int(row["requests"])) for row in monthly])
-    monthly_tokens = _chart_points([(row["usage_month"], int(row["total_tokens"])) for row in monthly])
+    monthly_request_rows = [(row["usage_month"], int(row["requests"])) for row in monthly]
+    monthly_token_rows = [(row["usage_month"], int(row["total_tokens"])) for row in monthly]
+    request_trend = _trend_chart(monthly_request_rows, series_label="Monthly request totals")
+    token_trend = _trend_chart(monthly_token_rows, series_label="Monthly token totals")
     top_users = _progress_rows([(row["label"], int(row["total_tokens"])) for row in top_users_rows], detail_label="tokens")
     top_models = _progress_rows([(row["model"], int(row["total_tokens"])) for row in model_rows], detail_label="tokens")
 
@@ -355,8 +575,8 @@ def build_overview_context(quota_manager: QuotaManager) -> Dict[str, Any]:
 
     return {
         "metrics": metrics,
-        "monthly_requests": monthly_requests,
-        "monthly_tokens": monthly_tokens,
+        "request_trend": request_trend,
+        "token_trend": token_trend,
         "top_users": top_users,
         "top_models": top_models,
         "storage": get_quota_storage_status(),
@@ -992,7 +1212,7 @@ def persist_quotas(quota_manager: QuotaManager, quotas: Dict[str, Any]) -> None:
         payload = serialize_quota_config(normalized)
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     except OSError as exc:
-        raise ValueError(f"Could not write quota config to {path}: {exc.strerror or exc}") from exc
+        raise ValueError(_storage_write_error("quotas", path, exc, setting_name="QUOTAS_JSON_PATH")) from exc
 
 
 def persist_backends(config: BridgeConfig) -> None:
@@ -1010,7 +1230,17 @@ def persist_backends(config: BridgeConfig) -> None:
         )
         path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     except OSError as exc:
-        raise ValueError(f"Could not write backend config to {path}: {exc.strerror or exc}") from exc
+        raise ValueError(_storage_write_error("backends", path, exc, setting_name="CIRCUIT_BACKENDS_JSON_PATH")) from exc
+
+
+def _storage_write_error(kind: str, path: Path, exc: OSError, *, setting_name: str) -> str:
+    reason = exc.strerror or str(exc)
+    if exc.errno in {errno.EROFS, errno.EACCES, errno.EPERM}:
+        return (
+            f"Could not save {kind}. The service cannot write {path}. "
+            f"Check systemd sandboxing and file permissions for {setting_name}, or move it to a writable location."
+        )
+    return f"Could not save {kind} to {path}: {reason}"
 
 
 def is_subkey_known(quota_manager: QuotaManager, subkey: str) -> bool:

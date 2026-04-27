@@ -1,0 +1,68 @@
+{% macro trend_panel(eyebrow, title, chart, accent="", empty_message="No trend data yet.") %}
+<article class="panel">
+  <div class="panel__head">
+    <div>
+      <p class="panel__eyebrow">{{ eyebrow }}</p>
+      <h2>{{ title }}</h2>
+    </div>
+  </div>
+  {% if chart %}
+  <div class="trend-card{% if accent %} trend-card--{{ accent }}{% endif %}">
+    <div class="trend-card__summary">
+      <div class="trend-card__headline">
+        <p class="trend-card__label">Current month</p>
+        <strong class="trend-card__value">{{ chart.current_value }}</strong>
+        <p class="trend-card__period">{{ chart.current_period }}</p>
+      </div>
+      <div class="trend-card__delta trend-card__delta--{{ chart.change_tone }}">
+        <strong>{{ chart.change_label }}</strong>
+        <span>{{ chart.change_detail }}</span>
+      </div>
+    </div>
+
+    <div class="trend-chart-shell">
+      <div class="trend-chart" role="img" aria-label="{{ chart.aria_label }}">
+        <div class="trend-chart__y-axis" aria-hidden="true">
+          {% for label in chart.y_labels %}
+          <span>{{ label }}</span>
+          {% endfor %}
+        </div>
+        <div class="trend-chart__plot">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <g class="trend-chart__grid">
+              <line x1="0" y1="12" x2="100" y2="12"></line>
+              <line x1="0" y1="51" x2="100" y2="51"></line>
+              <line x1="0" y1="90" x2="100" y2="90"></line>
+            </g>
+            <path class="trend-chart__area" d="{{ chart.area_path }}"></path>
+            <path class="trend-chart__line" d="{{ chart.line_path }}"></path>
+            {% for point in chart.points %}
+            <circle
+              class="trend-chart__point{% if point.is_current %} trend-chart__point--current{% endif %}"
+              cx="{{ point.x_pct }}"
+              cy="{{ point.y_pct }}"
+              r="{{ 2.9 if point.is_current else 2.1 }}"
+            >
+              <title>{{ point.value_label }} in {{ point.label }}</title>
+            </circle>
+            {% endfor %}
+          </svg>
+          <div class="trend-chart__x-axis" aria-hidden="true">
+            {% for label in chart.x_labels %}
+            <span style="left: {{ label.x_pct }}%">{{ label.label }}</span>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="trend-card__footer">
+      <span>Peak month: <strong>{{ chart.peak_value }}</strong> in {{ chart.peak_period }}</span>
+      <span>{{ chart.span_label }}</span>
+    </div>
+  </div>
+  {% else %}
+  <p class="empty-state">{{ empty_message }}</p>
+  {% endif %}
+</article>
+{% endmacro %}
